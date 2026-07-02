@@ -1,0 +1,26 @@
+name: stack_and_topple
+description: "Stack & Topple — a hyper-casual stacking game (V1 MVP)."
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # 2D game engine: game loop, canvas, overlays. (Increment A uses rendering only.)
+  flame: ^1.37.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
+# NOTE: later increments add — sensors_plus (tilt/Balance Mode), camera +
+# flutter_screen_recording + share_plus + permission_handler (record/share),
+# shared_preferences (settings). Kept out of Increment A to keep the core-feel
+# build small and web-previewable.
