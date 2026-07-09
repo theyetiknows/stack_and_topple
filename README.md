@@ -4,10 +4,11 @@ A hyper-casual stacking game (V1 / MVP). Tap to drop falling blocks and stack
 them as high as you can before the tower topples. Built to produce short,
 filmable, shareable runs.
 
-> **Status: Increment A — core-feel prototype.** Tap-to-drop + stacking + wobble
-> + topple, on the lateral (left/right) axis, with every feel constant exposed
-> for tuning. Balance Mode (tilt / depth axis), record & share, and the full
-> settings shell come in later increments — see `docs`/the architecture plan.
+> **Status: Increment B — Balance Mode + haptics.** The core loop (tap-drop,
+> exact-overlap slicing with falling debris, level-stepped difficulty,
+> pseudo-3D look) plus the opt-in tilt hard mode: calibrate to your holding
+> pose, then tilt to steady — or topple — the tower on BOTH the lateral and the
+> depth axis. Haptics throughout. Record & share is the next increment.
 
 ## Run it
 
@@ -41,6 +42,26 @@ instantly, without touching rendering or input. The most important dials:
 - `restoringStiffness` / `wobbleDamping` — how the tower wobbles and self-rights.
 - `toppleThreshold` — how far it can lean before it falls.
 - `debrisGravity` / `debrisSpin` — how the sliced-off pieces tumble (cosmetic).
+
+## Balance Mode (opt-in hard mode)
+
+Toggle it in Settings (gear icon). Starting a run then shows a calibration
+card: hold the phone the way you want to play and tap — that pose becomes the
+neutral baseline (works upright, flat, or lying on a couch). Tilt then DRIVES
+the tower's lean on two axes (roll → left/right, pitch → depth, rendered as a
+true-feeling 2.5D lean); tilting too far topples it, counter-tilting saves a
+leaning stack. Motion permission is requested only at that tap, never at
+launch.
+
+Platform notes:
+- **iOS app**: needs `NSMotionUsageDescription` (already in Info.plist).
+- **Web on iPhone (Safari)**: works via DeviceMotion — Safari shows its motion
+  permission prompt on the calibration tap. Requires HTTPS.
+- If tilt feels **inverted** on some device, flip `rollSign` / `pitchSign` in
+  `lib/core/tuning.dart` — don't touch the math.
+- Key feel dials: `tiltLeanTarget` (how much lean full tilt commands),
+  `tiltMaxAngle` (phone angle = full input), `tiltDeadZone`, `tiltSmoothing`,
+  `balanceStiffnessFactor` (how lazy self-righting gets in Balance Mode).
 
 ## Architecture (short version)
 

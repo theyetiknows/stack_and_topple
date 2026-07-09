@@ -22,6 +22,9 @@ enum GamePhase {
   gameOver,
 }
 
+/// Which lean axis a topple is falling along (drives the fall animation).
+enum ToppleAxis { lateral, depth }
+
 /// The single source of truth for a run.
 ///
 /// Deliberately a plain mutable object advanced in place by [GameLoop]; this
@@ -49,8 +52,18 @@ class GameState {
   // --- Lean physics (radians) --------------------------------------------------
   double leanLateral = 0; // Lx
   double leanLateralVel = 0;
-  double leanDepth = 0; // Lz — dormant until Balance Mode
+  double leanDepth = 0; // Lz — driven only while Balance Mode is active
   double leanDepthVel = 0;
+
+  // --- Balance Mode ------------------------------------------------------------
+  /// Whether this run was started with Balance Mode (tilt) engaged.
+  bool balanceModeActive = false;
+
+  /// Latest processed tilt input, HELD between sensor events (sensors emit at
+  /// ~50 Hz while the sim ticks at 120 Hz — snapping to zero between events
+  /// would turn tilt into jitter). Normalised to roughly [-1, 1].
+  double currentRoll = 0;
+  double currentPitch = 0;
 
   // --- Run bookkeeping ---------------------------------------------------------
   GamePhase phase = GamePhase.ready;
@@ -71,6 +84,7 @@ class GameState {
   // --- Topple / ending ----------------------------------------------------------
   double toppleTimer = 0;
   int toppleDir = 1;
+  ToppleAxis toppleAxis = ToppleAxis.lateral;
 
   /// Countdown used by [GamePhase.ending] (watch-the-miss-fall beat).
   double endTimer = 0;
@@ -86,6 +100,11 @@ class GameState {
   double get pieceRight => pieceCenterX + pieceWidth / 2;
 
   bool get isPlaying => phase == GamePhase.sweeping;
+
+  /// Radial lean magnitude ‖(Lx, Lz)‖ — the quantity tested against
+  /// [TuningConfig.toppleThreshold]. Equals |Lx| when Balance Mode is off.
+  double get leanMagnitude =>
+      math.sqrt(leanLateral * leanLateral + leanDepth * leanDepth);
 
   /// Difficulty tier: steps up every [TuningConfig.levelSize] placed blocks.
   int get level => blocksPlaced ~/ tuning.levelSize;

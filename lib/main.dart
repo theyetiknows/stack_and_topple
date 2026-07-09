@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 
+import 'settings/settings.dart';
 import 'ui/game_screen.dart';
 
-void main() => runApp(const StackAndToppleApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final settings = await Settings.load();
+  runApp(StackAndToppleApp(settings: settings));
+}
 
 class StackAndToppleApp extends StatelessWidget {
-  const StackAndToppleApp({super.key});
+  const StackAndToppleApp({super.key, required this.settings});
+
+  final Settings settings;
 
   @override
   Widget build(BuildContext context) {
@@ -17,7 +24,7 @@ class StackAndToppleApp extends StatelessWidget {
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFF10141C),
       ),
-      home: const GameScreen(),
+      home: GameScreen(settings: settings),
     );
   }
 }

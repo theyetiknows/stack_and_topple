@@ -66,5 +66,7 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSMotionUsageDescription</key>
+	<string>Balance Mode uses the motion sensor so you can steady the tower by tilting your phone.</string>
 </dict>
 </plist>

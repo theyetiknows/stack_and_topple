@@ -17,7 +17,8 @@ class GameLoop {
   final StabilityModel stability;
 
   /// (Re)start a run: reset to a single base block and begin sweeping.
-  void startRun() {
+  /// [balanceMode] arms the depth axis and the tilt→lean coupling.
+  void startRun({bool balanceMode = false}) {
     final t = state.tuning;
     state.tower
       ..clear()
@@ -29,6 +30,9 @@ class GameLoop {
     state.leanLateralVel = 0;
     state.leanDepth = 0;
     state.leanDepthVel = 0;
+    state.balanceModeActive = balanceMode;
+    state.currentRoll = 0;
+    state.currentPitch = 0;
     state.score = 0;
     state.blocksPlaced = 0;
     state.perfectDrops = 0;
@@ -38,6 +42,7 @@ class GameLoop {
     state.impactShakeTimer = 0;
     state.toppleTimer = 0;
     state.toppleDir = 1;
+    state.toppleAxis = ToppleAxis.lateral;
     state.endTimer = 0;
     state.phase = GamePhase.sweeping;
   }
@@ -66,25 +71,27 @@ class GameLoop {
         return;
 
       case GamePhase.sweeping:
-        // Resolve drops first, at the piece's current position.
+        // Consume input: drops resolve immediately at the piece's current
+        // position; balance readings are HELD on the state until the next
+        // reading arrives (sensor rate < sim rate).
         for (final e in events) {
-          if (e is DropEvent && state.phase == GamePhase.sweeping) {
-            _performDrop();
+          switch (e) {
+            case DropEvent():
+              if (state.phase == GamePhase.sweeping) _performDrop();
+            case BalanceEvent(:final input):
+              state.currentRoll = input.roll;
+              state.currentPitch = input.pitch;
           }
         }
         if (state.phase != GamePhase.sweeping) return; // drop ended the run
         _advanceSweep(dt);
-        stability.integrate(state, dt, _latestBalance(events));
+        stability.integrate(
+          state,
+          dt,
+          BalanceInput(roll: state.currentRoll, pitch: state.currentPitch),
+        );
         return;
     }
-  }
-
-  BalanceInput _latestBalance(List<InputEvent> events) {
-    var balance = const BalanceInput();
-    for (final e in events) {
-      if (e is BalanceEvent) balance = e.input;
-    }
-    return balance;
   }
 
   void _advanceSweep(double dt) {
@@ -210,6 +217,7 @@ class GameLoop {
   void _startTopple(int dir) {
     state.phase = GamePhase.toppling;
     state.toppleTimer = 0;
+    state.toppleAxis = ToppleAxis.lateral;
     state.toppleDir = dir == 0 ? 1 : dir;
   }
 }

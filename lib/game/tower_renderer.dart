@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../core/debris.dart';
@@ -7,11 +9,11 @@ import '../core/tuning.dart';
 /// Draws the tower from a read-only [GameState] snapshot. Pure presentation: it
 /// never mutates game state.
 ///
-/// The look is a hand-rolled pseudo-3D: each block is drawn as a lit front face,
-/// a highlighted top face and a shaded side face, receding up-right. This is the
-/// first slice of the planned 2.5D presentation — the same face geometry is what
-/// depth-lean (`Lz`) will skew in Balance Mode. The sky gradient drifts with
-/// height so each difficulty level visibly reads as a new tier.
+/// The look is a hand-rolled pseudo-3D: each block is a lit front face plus a
+/// highlighted top and shaded side face receding up-right. The DEPTH lean (Lz,
+/// Balance Mode) projects onto that same receding diagonal: blocks displace
+/// along it with height, narrow slightly (foreshortening) and darken as they
+/// recede — so a depth topple visibly falls "into" or "out of" the screen.
 class TowerPainter {
   TowerPainter({
     required this.state,
@@ -41,57 +43,61 @@ class TowerPainter {
   // Higher world-Y renders higher on screen (smaller screen-Y).
   double _sy(double wy) => _anchorScreenY + (cameraY - wy) * _scale;
 
+  /// World-space displacement along the depth diagonal for a point at world
+  /// height [hWorld], given the current depth lean (sin keeps the topple
+  /// animation bounded as the angle grows).
+  double _depthShiftWorld(double hWorld) =>
+      math.sin(state.leanDepth) * hWorld * tuning.depthLeanVisualGain;
+
   void paint(Canvas canvas) {
     if (width <= 0 || height <= 0) return;
 
     _paintSky(canvas);
     _paintGround(canvas);
 
-    // The whole tower tilts by the lean angle, pivoting about the base centre.
-    // (+lean = leaning right; canvas.rotate is clockwise for +angle in y-down.)
+    // The whole tower tilts by the LATERAL lean angle, pivoting about the base
+    // centre. (+lean = leaning right; canvas.rotate is clockwise in y-down.)
     final pivot = Offset(_sx(0), _sy(0));
     canvas.save();
     canvas.translate(pivot.dx, pivot.dy);
     canvas.rotate(state.leanLateral);
     canvas.translate(-pivot.dx, -pivot.dy);
 
-    // Placed blocks, base upward (higher blocks correctly occlude the top faces
-    // of the ones beneath them).
+    // Placed blocks, base upward (higher blocks correctly occlude the top
+    // faces of the ones beneath them).
     for (final b in state.tower) {
       final isTop = identical(b, state.tower.last);
       // Landing squash: the just-placed block compresses and springs back.
       var blockH = tuning.blockHeight;
       if (isTop && state.dropBounceTimer > 0 && state.blocksPlaced > 0) {
-        final p =
-            (state.dropBounceTimer / tuning.dropBounceDuration).clamp(0.0, 1.0);
+        final p = (state.dropBounceTimer / tuning.dropBounceDuration)
+            .clamp(0.0, 1.0);
         blockH *= 1 - 0.22 * p;
       }
       final bottomY = b.index * tuning.blockHeight;
-      _drawBlock3D(
+      _drawLeanedBlock(
         canvas,
-        Rect.fromLTRB(
-          _sx(b.left),
-          _sy(bottomY + blockH),
-          _sx(b.right),
-          _sy(bottomY),
-        ),
-        b.index,
+        centerX: b.centerX,
+        width: b.width,
+        bottomY: bottomY,
+        blockH: blockH,
+        index: b.index,
         active: false,
       );
     }
 
-    // The sweeping piece hovers one block-height above the current top.
+    // The sweeping piece hovers one block-height above the current top. It
+    // stays in the un-leaned aiming plane on purpose: it is the reference the
+    // player is lining up against.
     if (state.phase == GamePhase.sweeping) {
       final bottomY = (state.blocksPlaced + 1) * tuning.blockHeight;
-      _drawBlock3D(
+      _drawLeanedBlock(
         canvas,
-        Rect.fromLTRB(
-          _sx(state.pieceLeft),
-          _sy(bottomY + tuning.blockHeight),
-          _sx(state.pieceRight),
-          _sy(bottomY),
-        ),
-        state.blocksPlaced + 1,
+        centerX: state.pieceCenterX,
+        width: state.pieceWidth,
+        bottomY: bottomY,
+        blockH: tuning.blockHeight,
+        index: state.blocksPlaced + 1,
         active: true,
       );
     }
@@ -122,6 +128,34 @@ class TowerPainter {
     for (final d in state.debris) {
       _drawDebris(canvas, d);
     }
+  }
+
+  /// Draws one tower block with the depth-lean projection applied.
+  void _drawLeanedBlock(
+    Canvas canvas, {
+    required double centerX,
+    required double width,
+    required double bottomY,
+    required double blockH,
+    required int index,
+    required bool active,
+  }) {
+    final dz = _depthShiftWorld(bottomY + blockH / 2);
+    final dxPx = dz * _scale * _depthDirX;
+    final dyPx = dz * _scale * _depthDirY;
+    // Foreshorten: receding blocks narrow slightly, approaching ones widen.
+    final ws =
+        (1 - dz * tuning.depthForeshorten).clamp(0.55, 1.45).toDouble();
+    final halfW = width * ws / 2;
+    final front = Rect.fromLTRB(
+      _sx(centerX - halfW) + dxPx,
+      _sy(bottomY + blockH) + dyPx,
+      _sx(centerX + halfW) + dxPx,
+      _sy(bottomY) + dyPx,
+    );
+    final shade =
+        dz > 0 ? math.min(tuning.depthShade, dz * 0.12) : 0.0;
+    _drawBlock3D(canvas, front, index, active: active, shadeAlpha: shade);
   }
 
   // --- Sky / ground -----------------------------------------------------------
@@ -202,8 +236,13 @@ class TowerPainter {
 
   /// Front face at [front], with top and right faces receding by [_depthPx]
   /// toward the upper-right — the pseudo-3D that makes the stack feel solid.
-  void _drawBlock3D(Canvas canvas, Rect front, int index,
-      {required bool active}) {
+  void _drawBlock3D(
+    Canvas canvas,
+    Rect front,
+    int index, {
+    required bool active,
+    double shadeAlpha = 0,
+  }) {
     final base = _blockColor(index, active: active);
     final topFace = Color.lerp(base, Colors.white, 0.32)!;
     final sideFace = Color.lerp(base, Colors.black, 0.34)!;
@@ -245,6 +284,13 @@ class TowerPainter {
           ],
         ).createShader(front),
     );
+    // Depth-lean shading: receding blocks darken toward the horizon.
+    if (shadeAlpha > 0) {
+      canvas.drawRect(
+        front,
+        Paint()..color = Colors.black.withValues(alpha: shadeAlpha),
+      );
+    }
     if (active) {
       canvas.drawRect(
         front,
@@ -262,14 +308,14 @@ class TowerPainter {
     final center = Offset(_sx(d.centerX), _sy(d.bottomY + d.height / 2));
     // Fade out near end-of-life so culling is invisible.
     final life = 1 - (d.age / tuning.debrisLifetime);
-    final alpha = life.clamp(0, 1).toDouble();
+    final alpha = life.clamp(0.0, 1.0);
 
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(d.rotation);
     final front = Rect.fromCenter(center: Offset.zero, width: w, height: h);
-    final base =
-        _blockColor(state.blocksPlaced + 1, active: false).withValues(alpha: alpha);
+    final base = _blockColor(state.blocksPlaced + 1, active: false)
+        .withValues(alpha: alpha);
     canvas.drawRect(front, Paint()..color = base);
     canvas.drawRect(
       front,

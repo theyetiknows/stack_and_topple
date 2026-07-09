@@ -7,7 +7,7 @@
 ///
 /// Axis convention for the 2.5D design:
 ///   - "lateral" = left/right in screen space  (Lx) — active in the base game.
-///   - "depth"   = toward/away from camera      (Lz) — dormant until Balance Mode.
+///   - "depth"   = toward/away from camera      (Lz) — driven by Balance Mode.
 class TuningConfig {
   // ---------------------------------------------------------------------------
   // Piece sweep & difficulty ramp
@@ -89,7 +89,8 @@ class TuningConfig {
   // Lean / wobble dynamics
   //
   // The tower's lean is modelled as a damped harmonic oscillator on the tilt
-  // ANGLE (radians). Per tick:  a = -k*lean - c*leanVel (+ balance);  integrate.
+  // ANGLE (radians), independently per axis. Per tick:
+  //   a = -k*lean - c*leanVel (+ balance force);  integrate.
   // ---------------------------------------------------------------------------
 
   /// Spring stiffness k: how strongly the tower self-rights toward upright.
@@ -110,7 +111,8 @@ class TuningConfig {
   // Topple
   // ---------------------------------------------------------------------------
 
-  /// |lean| beyond this (radians) topples the tower. ~0.38 rad ≈ 22°.
+  /// Lean magnitude ‖(Lx, Lz)‖ beyond this (radians) topples the tower.
+  /// ~0.38 rad ≈ 22°. (With Balance OFF, Lz is always 0, so this is just |Lx|.)
   final double toppleThreshold;
 
   /// Seconds of "falling over" animation before the run ends (juice).
@@ -133,14 +135,69 @@ class TuningConfig {
   final double impactShakeDuration;
 
   // ---------------------------------------------------------------------------
-  // Balance Mode (Increment B — unused in A, listed here so all dials live together)
+  // Balance Mode — tilt input shaping (TiltProcessor)
+  //
+  // All tilt is measured as DEVIATION FROM A CALIBRATED BASELINE (the pose the
+  // player holds at run start), never from true horizontal — so it works lying
+  // on a couch. Angles are normalised so that [tiltMaxAngle] radians of
+  // deviation = full input (±1).
   // ---------------------------------------------------------------------------
 
-  /// How strongly tilt deviation pushes the lean.
-  final double tiltGain;
+  /// The lean (radians) the tower is DRIVEN TOWARD at full roll input: tilt
+  /// shifts the tower's equilibrium, it does not just nudge it. Set ABOVE
+  /// [toppleThreshold] so that, per the spec, holding a too-far tilt topples
+  /// the tower — and counter-tilting can pull a leaning tower back upright.
+  final double tiltLeanTarget;
 
-  /// Ignore tilt deviations smaller than this (dead-zone) to kill jitter.
+  /// Same, for pitch driving the DEPTH lean. Kept gentler than roll: the depth
+  /// axis is threatened only by the player's wrist, so it gets extra
+  /// forgiveness — but still above threshold so extreme pitch topples.
+  final double tiltLeanTargetPitch;
+
+  /// Ignore normalised tilt inputs smaller than this (dead-zone) to kill jitter.
   final double tiltDeadZone;
+
+  /// Deviation angle (radians) that maps to full input. ~0.35 rad ≈ 20°.
+  final double tiltMaxAngle;
+
+  /// Low-pass smoothing factor per sensor sample (0..1; higher = snappier).
+  final double tiltSmoothing;
+
+  /// Number of sensor samples averaged to set the calibration baseline.
+  final int calibrationSamples;
+
+  /// Sign flips for platform quirks. If tilt feels inverted on a device, flip
+  /// the corresponding constant to -1 — do not touch the math.
+  final double rollSign;
+  final double pitchSign;
+
+  // ---------------------------------------------------------------------------
+  // Balance Mode — how tilt reshapes the stability game
+  //
+  // With Balance ON the tower self-rights far more lazily, so the player's
+  // hand becomes the main stabilising force: tense, but recoverable.
+  // ---------------------------------------------------------------------------
+
+  /// Multiplier on [restoringStiffness] while Balance Mode is active (<1 =
+  /// lazier self-righting = the player's tilt matters more).
+  final double balanceStiffnessFactor;
+
+  /// Multiplier on [wobbleDamping] while Balance Mode is active.
+  final double balanceDampingFactor;
+
+  // ---------------------------------------------------------------------------
+  // Balance Mode — depth-lean presentation (pseudo-3D projection of Lz)
+  // ---------------------------------------------------------------------------
+
+  /// How far (world units per world unit of height) blocks displace along the
+  /// pseudo-3D depth diagonal per radian of depth lean. Purely visual.
+  final double depthLeanVisualGain;
+
+  /// How much receding blocks narrow per world unit of depth displacement.
+  final double depthForeshorten;
+
+  /// Max darkening overlay (0..1 alpha) on fully receding blocks.
+  final double depthShade;
 
   // ---------------------------------------------------------------------------
   // Scoring
@@ -176,8 +233,19 @@ class TuningConfig {
     this.perfectFlashDuration = 0.55,
     this.dropBounceDuration = 0.16,
     this.impactShakeDuration = 0.28,
-    this.tiltGain = 2.2,
-    this.tiltDeadZone = 0.03,
+    this.tiltLeanTarget = 0.55,
+    this.tiltLeanTargetPitch = 0.46,
+    this.tiltDeadZone = 0.06,
+    this.tiltMaxAngle = 0.35,
+    this.tiltSmoothing = 0.22,
+    this.calibrationSamples = 15,
+    this.rollSign = 1.0,
+    this.pitchSign = 1.0,
+    this.balanceStiffnessFactor = 0.45,
+    this.balanceDampingFactor = 0.8,
+    this.depthLeanVisualGain = 1.0,
+    this.depthForeshorten = 0.055,
+    this.depthShade = 0.35,
     this.perfectBonus = 2,
   });
 }

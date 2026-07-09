@@ -35,14 +35,42 @@ void main() {
     state.leanLateral = state.tuning.toppleThreshold + 0.05;
     model.integrate(state, 1 / 120, const BalanceInput());
     expect(state.phase, GamePhase.toppling);
+    expect(state.toppleAxis, ToppleAxis.lateral);
     expect(state.toppleDir, 1);
   });
 
-  test('balance roll input drives the lean (Balance Mode wiring)', () {
-    state.leanLateral = 0;
-    state.leanLateralVel = 0;
+  test('balance roll drives the lateral lean only when Balance Mode is active',
+      () {
+    // Inactive: tilt input must be completely inert.
+    model.integrate(state, 1 / 120, const BalanceInput(roll: 1.0));
+    expect(state.leanLateralVel, 0);
+
+    // Active: the same input pushes the tower.
+    state.balanceModeActive = true;
     model.integrate(state, 1 / 120, const BalanceInput(roll: 1.0));
     expect(state.leanLateralVel, greaterThan(0));
+  });
+
+  test('pitch drives the depth axis and can topple it (radial test)', () {
+    state.balanceModeActive = true;
+    // Hold full pitch until the depth lean crosses the radial threshold.
+    var toppled = false;
+    for (var i = 0; i < 5000 && !toppled; i++) {
+      model.integrate(state, 1 / 120, const BalanceInput(pitch: 1.0));
+      toppled = state.phase == GamePhase.toppling;
+    }
+    expect(toppled, isTrue);
+    expect(state.toppleAxis, ToppleAxis.depth);
+    expect(state.toppleDir, 1);
+    expect(state.leanLateral.abs(), lessThan(state.leanDepth.abs()));
+  });
+
+  test('depth axis stays exactly zero with Balance Mode off', () {
+    for (var i = 0; i < 1000; i++) {
+      model.integrate(state, 1 / 120, const BalanceInput(pitch: 1.0));
+    }
+    expect(state.leanDepth, 0);
+    expect(state.leanDepthVel, 0);
   });
 
   test('advanceTopple completes after the animation duration', () {
@@ -57,5 +85,18 @@ void main() {
     expect(done, isTrue);
     expect(state.toppleTimer,
         greaterThanOrEqualTo(state.tuning.toppleAnimDuration));
+  });
+
+  test('advanceTopple drives the depth axis for depth topples', () {
+    state
+      ..phase = GamePhase.toppling
+      ..toppleAxis = ToppleAxis.depth
+      ..toppleDir = -1
+      ..toppleTimer = 0;
+    for (var i = 0; i < 30; i++) {
+      model.advanceTopple(state, 1 / 60);
+    }
+    expect(state.leanDepth, lessThan(0)); // falling away in -z
+    expect(state.leanLateral, 0); // lateral untouched
   });
 }

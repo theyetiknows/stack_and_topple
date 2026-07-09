@@ -2,35 +2,51 @@ import 'game_state.dart';
 import 'input/input_event.dart';
 import 'stability_model.dart';
 
-/// V1 stability model: a hand-tuned damped harmonic oscillator on the lean angle.
+/// V1 stability model: a hand-tuned damped harmonic oscillator on the lean
+/// angle, run independently per axis.
 ///
 /// Why hand-rolled instead of a physics engine: it gives direct, legible control
 /// over exactly the constants we want to tune (wobble, restoring, forgiveness,
-/// topple) and — unlike a 2D solver — extends cleanly to the depth axis in
-/// Balance Mode. It sits behind [StabilityModel] so a physics-backed variant can
-/// be swapped in later.
+/// topple) and — unlike a 2D solver — extends cleanly to the depth axis. It sits
+/// behind [StabilityModel] so a physics-backed variant can be swapped in later.
 ///
-/// Increment A drives only the lateral axis; the depth-axis code paths are
-/// present but receive no input until Balance Mode is wired up.
+/// Axis roles: drops attack ONLY the lateral axis; the depth axis is threatened
+/// (and defended) purely by tilt, so it exists as a live axis only while
+/// Balance Mode is active. Topple is radial: ‖(Lx, Lz)‖ > threshold.
 class CustomStabilityModel implements StabilityModel {
   @override
   void integrate(GameState state, double dt, BalanceInput balance) {
     final t = state.tuning;
+    final active = state.balanceModeActive;
 
-    // Balance Mode contributes an angular acceleration; zero in the base game.
-    final balanceAccelLateral = balance.roll * t.tiltGain;
+    // Balance Mode deliberately weakens the self-righting spring so the
+    // player's hand becomes the main stabilising force.
+    final k = t.restoringStiffness * (active ? t.balanceStiffnessFactor : 1);
+    final c = t.wobbleDamping * (active ? t.balanceDampingFactor : 1);
 
-    // Damped harmonic oscillator:  a = -k*x - c*v (+ balance)
-    final accel = -t.restoringStiffness * state.leanLateral -
-        t.wobbleDamping * state.leanLateralVel +
-        balanceAccelLateral;
-
+    // Tilt SHIFTS THE EQUILIBRIUM the spring pulls toward (tilting the phone
+    // commands a lean), rather than adding a force. This is what makes both
+    // halves of the spec true at once: holding a too-far tilt drives the lean
+    // past the topple threshold, and counter-tilting pulls a leaning tower
+    // back toward upright.
+    final rollTarget = active ? balance.roll * t.tiltLeanTarget : 0.0;
+    final ax = -k * (state.leanLateral - rollTarget) -
+        c * state.leanLateralVel;
     // Semi-implicit Euler (stable for these constants at our fixed dt).
-    state.leanLateralVel += accel * dt;
+    state.leanLateralVel += ax * dt;
     state.leanLateral += state.leanLateralVel * dt;
 
-    if (state.leanLateral.abs() > t.toppleThreshold) {
-      _beginTopple(state, state.leanLateral);
+    // Depth axis: same oscillator, gentler target, only while active.
+    if (active) {
+      final pitchTarget = balance.pitch * t.tiltLeanTargetPitch;
+      final az = -k * (state.leanDepth - pitchTarget) -
+          c * state.leanDepthVel;
+      state.leanDepthVel += az * dt;
+      state.leanDepth += state.leanDepthVel * dt;
+    }
+
+    if (state.leanMagnitude > t.toppleThreshold) {
+      _beginTopple(state);
     }
   }
 
@@ -38,6 +54,7 @@ class CustomStabilityModel implements StabilityModel {
   void applyDropImpulse(GameState state, double normalizedMisalign) {
     final t = state.tuning;
     // A velocity kick (visible wobble) plus a small static lean offset.
+    // Drops only ever attack the lateral axis — by design.
     state.leanLateralVel += normalizedMisalign * t.dropKickGain;
     state.leanLateral += normalizedMisalign * t.leanOffsetGain;
   }
@@ -46,17 +63,28 @@ class CustomStabilityModel implements StabilityModel {
   bool advanceTopple(GameState state, double dt) {
     final t = state.tuning;
     state.toppleTimer += dt;
-    // Accelerate the fall in the chosen direction so it visibly tips over.
-    state.leanLateralVel += state.toppleDir * t.toppleFallAccel * dt;
-    state.leanLateral += state.leanLateralVel * dt;
+    // Accelerate the fall along the failing axis so it visibly tips over.
+    if (state.toppleAxis == ToppleAxis.depth) {
+      state.leanDepthVel += state.toppleDir * t.toppleFallAccel * dt;
+      state.leanDepth += state.leanDepthVel * dt;
+    } else {
+      state.leanLateralVel += state.toppleDir * t.toppleFallAccel * dt;
+      state.leanLateral += state.leanLateralVel * dt;
+    }
     return state.toppleTimer >= t.toppleAnimDuration;
   }
 
-  /// Enter the topple animation, tipping in the direction of the current lean.
-  void _beginTopple(GameState state, double leanValue) {
+  /// Enter the topple animation, falling along the dominant lean axis.
+  void _beginTopple(GameState state) {
     state.phase = GamePhase.toppling;
     state.toppleTimer = 0;
-    final dir = leanValue.sign.toInt(); // double.sign / toInt are built-ins
+    final lateralDominates =
+        state.leanLateral.abs() >= state.leanDepth.abs();
+    state.toppleAxis =
+        lateralDominates ? ToppleAxis.lateral : ToppleAxis.depth;
+    final component =
+        lateralDominates ? state.leanLateral : state.leanDepth;
+    final dir = component.sign.toInt();
     state.toppleDir = dir == 0 ? 1 : dir;
   }
 }

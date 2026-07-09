@@ -6,15 +6,16 @@ import 'package:flutter/material.dart';
 import '../core/custom_stability_model.dart';
 import '../core/game_loop.dart';
 import '../core/game_state.dart';
+import '../core/input/input_event.dart';
 import '../core/tuning.dart';
 import '../input/tap_input_source.dart';
+import '../input/tilt_input_source.dart';
 import 'tower_renderer.dart';
 
 /// The Flame adapter: it owns the game loop, drives a fixed-timestep tick, and
-/// renders the read-only [GameState]. It contains NO game rules — all feel logic
-/// lives in the pure-Dart core. Phase/score/level/perfects are exposed as
-/// [ValueNotifier]s so Flutter overlays (HUD, start/game-over) can react without
-/// polling.
+/// renders the read-only [GameState]. It contains NO game rules — all feel
+/// logic lives in the pure-Dart core. Phase/score/level/perfects are exposed
+/// as [ValueNotifier]s so Flutter overlays (HUD, cards) react without polling.
 class StackGame extends FlameGame {
   StackGame({TuningConfig? tuning}) : tuning = tuning ?? defaultTuning;
 
@@ -24,6 +25,7 @@ class StackGame extends FlameGame {
   late final GameLoop loop =
       GameLoop(state: state, stability: CustomStabilityModel());
   final TapInputSource _tap = TapInputSource();
+  TiltInputSource? _tilt;
 
   final ValueNotifier<GamePhase> phase = ValueNotifier(GamePhase.ready);
   final ValueNotifier<int> score = ValueNotifier(0);
@@ -36,8 +38,24 @@ class StackGame extends FlameGame {
   double _cameraY = 0;
   double _shakePhase = 0; // presentation-only clock for the shake wiggle
 
-  void startRun() {
-    loop.startRun();
+  /// Permission + baseline calibration for Balance Mode. Must be called from
+  /// a user gesture (the calibration tap) — iOS Safari's motion permission
+  /// only resolves inside one. Returns false if motion is unavailable/denied.
+  Future<bool> prepareBalanceMode() async {
+    _tilt ??= TiltInputSource(tuning);
+    if (!await _tilt!.requestPermission()) return false;
+    return _tilt!.calibrate();
+  }
+
+  /// Drop the tilt source (used when starting a classic run so a stale sensor
+  /// subscription never outlives the mode that needed it).
+  void detachTilt() {
+    _tilt?.dispose();
+    _tilt = null;
+  }
+
+  void startRun({bool balanceMode = false}) {
+    loop.startRun(balanceMode: balanceMode && _tilt != null);
     _accum = 0;
     _cameraY = 0;
     _syncNotifiers();
@@ -59,9 +77,10 @@ class StackGame extends FlameGame {
     _accum += dt;
     if (_accum > 0.25) _accum = 0.25; // clamp to avoid a spiral of death
 
-    // Deliver this frame's taps only to the first sub-step, so a drop resolves
-    // once at the piece's current position.
-    final events = _tap.drain();
+    // Deliver this frame's inputs only to the first sub-step: drops resolve
+    // once at the piece's current position, and balance values are held on
+    // the state for the remaining sub-steps anyway.
+    final events = <InputEvent>[..._tap.drain(), ...?_tilt?.drain()];
     var firstStep = true;
     while (_accum >= _fixedDt) {
       loop.tick(_fixedDt, firstStep ? events : const []);
@@ -82,8 +101,8 @@ class StackGame extends FlameGame {
     super.render(canvas);
     if (size.x <= 0 || size.y <= 0) return;
 
-    // Impact shake: a small decaying wiggle after sloppy drops. Purely a canvas
-    // translation — the simulation never sees it.
+    // Impact shake: a small decaying wiggle after sloppy drops. Purely a
+    // canvas translation — the simulation never sees it.
     canvas.save();
     if (state.impactShakeTimer > 0) {
       final p = state.impactShakeTimer / tuning.impactShakeDuration;
@@ -114,6 +133,7 @@ class StackGame extends FlameGame {
 
   @override
   void onRemove() {
+    detachTilt();
     phase.dispose();
     score.dispose();
     level.dispose();

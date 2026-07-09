@@ -138,6 +138,33 @@ void main() {
     });
   });
 
+  group('balance mode wiring', () {
+    test('balance input is HELD between events (sensor slower than sim)', () {
+      final loop = _newRun();
+      final s = loop.state;
+      loop.startRun(balanceMode: true);
+      loop.tick(1 / 120, const [BalanceEvent(BalanceInput(roll: 1.0))]);
+      final v1 = s.leanLateralVel;
+      expect(v1, greaterThan(0));
+      for (var i = 0; i < 10; i++) {
+        loop.tick(1 / 120, const []); // no new events
+      }
+      expect(s.currentRoll, 1.0); // still held
+      expect(s.leanLateral, greaterThan(0)); // force kept integrating
+    });
+
+    test('classic runs ignore balance events entirely', () {
+      final loop = _newRun(); // startRun() default: balanceMode false
+      final s = loop.state;
+      for (var i = 0; i < 60; i++) {
+        loop.tick(1 / 120, const [BalanceEvent(BalanceInput(roll: 1.0))]);
+      }
+      expect(s.leanLateral, 0);
+      expect(s.leanDepth, 0);
+      expect(s.phase, GamePhase.sweeping);
+    });
+  });
+
   test('identical scripted input is deterministic', () {
     List<double> run() {
       final loop = _newRun();

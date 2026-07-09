@@ -9,8 +9,15 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # 2D game engine: game loop, canvas, overlays. (Increment A uses rendering only.)
+  # 2D game engine: game loop, canvas, overlays.
   flame: ^1.37.0
+  # Accelerometer stream for Balance Mode tilt (native platforms).
+  sensors_plus: ^7.0.0
+  # Persisted settings toggles (Balance Mode, Haptics).
+  shared_preferences: ^2.3.0
+  # Browser DeviceMotion bindings so Balance Mode also works on the web build
+  # (including the iOS Safari motion-permission flow).
+  web: ^1.1.0
 
 dev_dependencies:
   flutter_test:
@@ -20,7 +27,5 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-# NOTE: later increments add — sensors_plus (tilt/Balance Mode), camera +
-# flutter_screen_recording + share_plus + permission_handler (record/share),
-# shared_preferences (settings). Kept out of Increment A to keep the core-feel
-# build small and web-previewable.
+# NOTE: the record/share increment adds — camera + flutter_screen_recording +
+# share_plus + permission_handler. Deliberately not added until that increment.
