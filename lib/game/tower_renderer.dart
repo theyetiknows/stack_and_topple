@@ -128,6 +128,21 @@ class TowerPainter {
     for (final d in state.debris) {
       _drawDebris(canvas, d);
     }
+
+    // SAVE window: pulsing red edge glow while the player fights to steady
+    // the tower. Driven by the deterministic save timer, not wall-clock.
+    if (state.phase == GamePhase.critical) {
+      final pulse =
+          0.28 + 0.18 * math.sin(state.saveWindowTimer * 12).abs();
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, width, height).deflate(3),
+        Paint()
+          ..color = const Color(0xFFFF5252).withValues(alpha: pulse)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+      );
+    }
   }
 
   /// Draws one tower block with the depth-lean projection applied.

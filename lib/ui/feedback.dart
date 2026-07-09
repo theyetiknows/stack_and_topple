@@ -6,8 +6,8 @@ import '../game/stack_game.dart';
 import '../settings/settings.dart';
 
 /// Fires haptic pulses off game-state transitions: a light tick per placed
-/// block, a firmer pulse on PERFECT, a click on level-up, and a heavy thud
-/// when the run ends. Presentation-side only — it observes the game's
+/// block, a firmer pulse on PERFECT, a click on level-up, a heavy jolt when
+/// the tower goes critical or collapses, and a medium pulse on a save. Presentation-side only — it observes the game's
 /// notifiers and never touches the loop. HapticFeedback needs no permission
 /// and is a silent no-op on web.
 class HapticsController {
@@ -15,10 +15,12 @@ class HapticsController {
     _lastScore = game.score.value;
     _lastPerfects = game.perfectDrops.value;
     _lastLevel = game.level.value;
+    _lastSaves = game.saves.value;
     game.score.addListener(_onScore);
     game.perfectDrops.addListener(_onPerfect);
     game.level.addListener(_onLevel);
     game.phase.addListener(_onPhase);
+    game.saves.addListener(_onSave);
   }
 
   final StackGame game;
@@ -27,6 +29,7 @@ class HapticsController {
   late int _lastScore;
   late int _lastPerfects;
   late int _lastLevel;
+  late int _lastSaves;
 
   bool get _enabled => settings.haptics && !kIsWeb;
 
@@ -56,9 +59,19 @@ class HapticsController {
 
   void _onPhase() {
     final p = game.phase.value;
-    if ((p == GamePhase.toppling || p == GamePhase.ending) && _enabled) {
+    if ((p == GamePhase.toppling ||
+            p == GamePhase.ending ||
+            p == GamePhase.critical) &&
+        _enabled) {
       HapticFeedback.heavyImpact();
     }
+  }
+
+  void _onSave() {
+    final v = game.saves.value;
+    final rose = v > _lastSaves;
+    _lastSaves = v;
+    if (rose && _enabled) HapticFeedback.mediumImpact();
   }
 
   void dispose() {
@@ -66,5 +79,6 @@ class HapticsController {
     game.perfectDrops.removeListener(_onPerfect);
     game.level.removeListener(_onLevel);
     game.phase.removeListener(_onPhase);
+    game.saves.removeListener(_onSave);
   }
 }

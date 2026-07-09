@@ -18,6 +18,7 @@ class Hud extends StatelessWidget {
         valueListenable: game.phase,
         builder: (context, phase, _) {
           final visible = phase == GamePhase.sweeping ||
+              phase == GamePhase.critical ||
               phase == GamePhase.toppling ||
               phase == GamePhase.ending;
           if (!visible) return const SizedBox.shrink();
@@ -43,8 +44,23 @@ class Hud extends StatelessWidget {
               ),
               Align(
                 alignment: const Alignment(0, -0.25),
-                child: _LevelUpToast(level: game.level),
+                child: _LevelUpToast(
+                  level: game.level,
+                  bonus: game.tuning.levelBonus,
+                ),
               ),
+              Align(
+                alignment: const Alignment(0, -0.6),
+                child: _SaveFlash(
+                  saves: game.saves,
+                  bonus: game.tuning.saveBonus,
+                ),
+              ),
+              if (phase == GamePhase.critical)
+                const Align(
+                  alignment: Alignment(0, -0.35),
+                  child: _CriticalWarning(),
+                ),
             ],
           );
         },
@@ -80,6 +96,87 @@ class _ScorePop extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Blinking SAVE IT! while the tower is critical and the player can rescue it.
+class _CriticalWarning extends StatefulWidget {
+  const _CriticalWarning();
+
+  @override
+  State<_CriticalWarning> createState() => _CriticalWarningState();
+}
+
+class _CriticalWarningState extends State<_CriticalWarning>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 380),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween(begin: 0.45, end: 1.0).animate(_pulse),
+      child: const Text(
+        'SAVE IT!',
+        style: TextStyle(
+          fontSize: 30,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 3.0,
+          color: Color(0xFFFF5252),
+          shadows: [Shadow(blurRadius: 14, color: Colors.black87)],
+        ),
+      ),
+    );
+  }
+}
+
+/// "SAVED! +N" celebration when a critical tower is rescued.
+class _SaveFlash extends StatelessWidget {
+  const _SaveFlash({required this.saves, required this.bonus});
+
+  final ValueNotifier<int> saves;
+  final int bonus;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: saves,
+      builder: (context, count, _) {
+        if (count == 0) return const SizedBox.shrink();
+        return TweenAnimationBuilder<double>(
+          key: ValueKey(count),
+          tween: Tween(begin: 0.0, end: 1.0),
+          duration: const Duration(milliseconds: 950),
+          builder: (context, t, _) {
+            final opacity = t < 0.2 ? t / 0.2 : (1 - t) / 0.8;
+            return Opacity(
+              opacity: opacity.clamp(0, 1),
+              child: Transform.scale(
+                scale: 0.9 + 0.35 * t,
+                child: Text(
+                  'SAVED!  +$bonus',
+                  style: const TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2.5,
+                    color: Color(0xFF69F0AE),
+                    shadows: [Shadow(blurRadius: 14, color: Colors.black87)],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -147,11 +244,12 @@ class _PerfectFlash extends StatelessWidget {
   }
 }
 
-/// Brief toast when the difficulty steps up a level.
+/// Brief toast when the difficulty steps up a level (with its one-time bonus).
 class _LevelUpToast extends StatelessWidget {
-  const _LevelUpToast({required this.level});
+  const _LevelUpToast({required this.level, required this.bonus});
 
   final ValueNotifier<int> level;
+  final int bonus;
 
   @override
   Widget build(BuildContext context) {
@@ -168,7 +266,7 @@ class _LevelUpToast extends StatelessWidget {
             return Opacity(
               opacity: opacity.clamp(0, 1),
               child: Text(
-                'LEVEL ${value + 1} — FASTER',
+                'LEVEL ${value + 1} — FASTER  +$bonus',
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,

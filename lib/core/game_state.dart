@@ -12,7 +12,11 @@ enum GamePhase {
   /// A piece is sweeping and can be dropped.
   sweeping,
 
-  /// The tower is falling over (topple animation), run about to end.
+  /// Balance Mode caught a topple: top blocks shed, brief SAVE window —
+  /// steady the tower to continue from the lower height.
+  critical,
+
+  /// The tower is breaking apart (per-block jumble), run about to end.
   toppling,
 
   /// The piece missed entirely: brief beat while it falls, then game over.
@@ -21,9 +25,6 @@ enum GamePhase {
   /// Run finished; show score + share.
   gameOver,
 }
-
-/// Which lean axis a topple is falling along (drives the fall animation).
-enum ToppleAxis { lateral, depth }
 
 /// The single source of truth for a run.
 ///
@@ -81,10 +82,18 @@ class GameState {
   double dropBounceTimer = 0;
   double impactShakeTimer = 0;
 
-  // --- Topple / ending ----------------------------------------------------------
-  double toppleTimer = 0;
-  int toppleDir = 1;
-  ToppleAxis toppleAxis = ToppleAxis.lateral;
+  // --- Collapse / save / ending --------------------------------------------------
+  /// Elapsed time of the collapse jumble (GamePhase.toppling).
+  double collapseTimer = 0;
+
+  /// Remaining time in the SAVE window (GamePhase.critical).
+  double saveWindowTimer = 0;
+
+  /// Successful Balance-Mode saves this run (drives the SAVED! flash).
+  int saves = 0;
+
+  /// Highest level already granted its one-time bonus this run.
+  int highestLevelAwarded = 0;
 
   /// Countdown used by [GamePhase.ending] (watch-the-miss-fall beat).
   double endTimer = 0;

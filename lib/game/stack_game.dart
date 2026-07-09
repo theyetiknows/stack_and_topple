@@ -31,6 +31,7 @@ class StackGame extends FlameGame {
   final ValueNotifier<int> score = ValueNotifier(0);
   final ValueNotifier<int> level = ValueNotifier(0);
   final ValueNotifier<int> perfectDrops = ValueNotifier(0);
+  final ValueNotifier<int> saves = ValueNotifier(0);
 
   /// Fixed simulation step — decouples feel from frame rate for determinism.
   static const double _fixedDt = 1 / 120;
@@ -129,6 +130,7 @@ class StackGame extends FlameGame {
     if (perfectDrops.value != state.perfectDrops) {
       perfectDrops.value = state.perfectDrops;
     }
+    if (saves.value != state.saves) saves.value = state.saves;
   }
 
   @override
@@ -138,6 +140,7 @@ class StackGame extends FlameGame {
     score.dispose();
     level.dispose();
     perfectDrops.dispose();
+    saves.dispose();
     super.onRemove();
   }
 }

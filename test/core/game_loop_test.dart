@@ -12,6 +12,15 @@ GameLoop _newRun([TuningConfig? tuning]) {
   return loop;
 }
 
+/// Stack [n] perfect drops so there is a tower to knock over.
+void _stack(GameLoop loop, int n) {
+  final s = loop.state;
+  for (var i = 0; i < n; i++) {
+    s.pieceCenterX = s.top.centerX;
+    loop.tick(1 / 120, const [DropEvent()]);
+  }
+}
+
 void main() {
   group('drop resolution', () {
     test('perfect drop keeps platform width, no lean, no debris', () {
@@ -53,23 +62,25 @@ void main() {
       expect(s.score, 1);
     });
 
-    test('debris falls under gravity and is culled after its lifetime', () {
+    test('debris lands on the ground and settles instead of falling forever',
+        () {
       final loop = _newRun();
       final s = loop.state;
       s.pieceCenterX = s.top.centerX + 0.5;
       loop.tick(1 / 120, const [DropEvent()]);
       final d = s.debris.single;
-      final y0 = d.bottomY;
 
-      for (var i = 0; i < 60; i++) {
+      // Simulate until it reaches the floor and stops bouncing.
+      for (var i = 0; i < 400; i++) {
         loop.tick(1 / 120, const []);
       }
-      expect(d.bottomY, lessThan(y0)); // falling (world Y is up)
+      expect(d.bottomY, greaterThanOrEqualTo(0)); // never sinks underground
+      expect(d.vy, 0); // settled
 
       for (var i = 0; i < 1000 && s.debris.isNotEmpty; i++) {
         loop.tick(1 / 60, const []);
       }
-      expect(s.debris, isEmpty); // culled by lifetime
+      expect(s.debris, isEmpty); // culled by lifetime after settling
     });
 
     test('total miss: piece falls as debris, brief beat, then game over', () {
@@ -79,7 +90,7 @@ void main() {
       s.pieceCenterX = s.top.right + s.pieceWidth; // no overlap at all
       loop.tick(1 / 120, const [DropEvent()]);
 
-      expect(s.phase, GamePhase.ending); // watch-it-fall beat, not a topple
+      expect(s.phase, GamePhase.ending); // watch-it-fall beat
       expect(s.debris, hasLength(1));
       expect(s.debris.single.width, closeTo(pieceW, 1e-9));
       expect(s.blocksPlaced, 0); // a miss places nothing
@@ -91,7 +102,7 @@ void main() {
     });
   });
 
-  group('difficulty ramp', () {
+  group('difficulty ramp & level bonus', () {
     test('sweep speed takes a chunky step at each level boundary', () {
       final s = GameState(const TuningConfig());
       final t = s.tuning;
@@ -109,6 +120,16 @@ void main() {
       expect(afterStep, lessThanOrEqualTo(t.maxSweepSpeed));
     });
 
+    test('reaching a level awards its one-time bonus', () {
+      final loop = _newRun();
+      final s = loop.state;
+      final t = s.tuning;
+      _stack(loop, t.levelSize); // exactly crosses into level 1
+      expect(s.level, 1);
+      // levelSize perfect drops + the level bonus, exactly once.
+      expect(s.score, t.levelSize * (1 + t.perfectBonus) + t.levelBonus);
+    });
+
     test('sweep speed is capped', () {
       final s = GameState(const TuningConfig());
       s.blocksPlaced = 10000;
@@ -116,52 +137,127 @@ void main() {
     });
   });
 
-  group('stability', () {
-    test('lean beyond threshold topples', () {
+  group('collapse (classic mode)', () {
+    test('crossing the threshold breaks the tower into a ground jumble', () {
       final loop = _newRun();
       final s = loop.state;
+      _stack(loop, 5);
+      final aboveBase = s.tower.length - 1;
+      final scoreBefore = s.score;
+
       s.leanLateral = s.tuning.toppleThreshold + 0.1;
       loop.tick(1 / 120, const []);
+
       expect(s.phase, GamePhase.toppling);
+      expect(s.tower, hasLength(1)); // only the base survives
+      expect(s.debris.length, aboveBase); // every block tumbles individually
+      expect(s.leanLateral, 0); // base sits flat — no spinning tower
+      expect(s.score, scoreBefore); // terminal collapse keeps the score
+
+      for (var i = 0; i < 2000 && s.phase == GamePhase.toppling; i++) {
+        loop.tick(1 / 60, const []);
+      }
+      expect(s.phase, GamePhase.gameOver);
     });
 
-    test('small wobble recovers toward upright without toppling', () {
+    test('classic mode never enters the save window', () {
       final loop = _newRun();
       final s = loop.state;
-      s.leanLateral = 0.05;
-      final start = s.leanLateral.abs();
-      for (var i = 0; i < 240 && s.phase == GamePhase.sweeping; i++) {
-        loop.tick(1 / 120, const []);
-      }
-      expect(s.phase, GamePhase.sweeping);
-      expect(s.leanLateral.abs(), lessThan(start));
+      _stack(loop, 6);
+      s.leanLateral = s.tuning.toppleThreshold + 0.05;
+      loop.tick(1 / 120, const []);
+      expect(s.phase, GamePhase.toppling); // straight to collapse
     });
   });
 
-  group('balance mode wiring', () {
-    test('balance input is HELD between events (sensor slower than sim)', () {
+  group('balance mode saves', () {
+    test('instability sheds top blocks and opens the SAVE window', () {
       final loop = _newRun();
       final s = loop.state;
       loop.startRun(balanceMode: true);
-      loop.tick(1 / 120, const [BalanceEvent(BalanceInput(roll: 1.0))]);
-      final v1 = s.leanLateralVel;
-      expect(v1, greaterThan(0));
-      for (var i = 0; i < 10; i++) {
-        loop.tick(1 / 120, const []); // no new events
-      }
-      expect(s.currentRoll, 1.0); // still held
-      expect(s.leanLateral, greaterThan(0)); // force kept integrating
+      _stack(loop, 4);
+      final heightBefore = s.tower.length; // 5 (base + 4)
+      final scoreBefore = s.score;
+
+      s.leanLateral = s.tuning.toppleThreshold + 0.05;
+      loop.tick(1 / 120, const []);
+
+      expect(s.phase, GamePhase.critical);
+      expect(s.tower.length, lessThan(heightBefore)); // top shed
+      expect(s.debris, isNotEmpty); // shed blocks tumble
+      expect(s.score, lessThan(scoreBefore)); // fallen-block penalty
+      expect(s.blocksPlaced, s.tower.length - 1); // height bookkeeping
+      // Lean clamped back inside the threshold, still critical.
+      expect(s.leanMagnitude, lessThan(s.tuning.toppleThreshold));
     });
 
-    test('classic runs ignore balance events entirely', () {
-      final loop = _newRun(); // startRun() default: balanceMode false
+    test('levelling the phone within the window SAVES the run', () {
+      final loop = _newRun();
       final s = loop.state;
-      for (var i = 0; i < 60; i++) {
-        loop.tick(1 / 120, const [BalanceEvent(BalanceInput(roll: 1.0))]);
+      final t = s.tuning;
+      loop.startRun(balanceMode: true);
+      _stack(loop, 4);
+      final scoreBefore = s.score;
+
+      s.leanLateral = t.toppleThreshold + 0.05;
+      loop.tick(1 / 120, const []);
+      expect(s.phase, GamePhase.critical);
+      final shedPenalty = scoreBefore - s.score;
+      expect(shedPenalty, greaterThan(0));
+
+      // Player levels the phone: neutral balance → weak spring recovers.
+      var ticks = 0;
+      while (s.phase == GamePhase.critical && ticks < 600) {
+        loop.tick(1 / 120, const [BalanceEvent(BalanceInput())]);
+        ticks++;
       }
-      expect(s.leanLateral, 0);
-      expect(s.leanDepth, 0);
-      expect(s.phase, GamePhase.sweeping);
+      expect(s.phase, GamePhase.sweeping); // SAVED — run continues, lower
+      expect(s.saves, 1);
+      expect(s.score, scoreBefore - shedPenalty + t.saveBonus);
+    });
+
+    test('holding a hard adverse tilt re-tips into a full collapse', () {
+      final loop = _newRun();
+      final s = loop.state;
+      loop.startRun(balanceMode: true);
+      _stack(loop, 4);
+
+      s.leanLateral = s.tuning.toppleThreshold + 0.05;
+      loop.tick(1 / 120, const []);
+      expect(s.phase, GamePhase.critical);
+
+      // Player keeps tilting hard the wrong way: equilibrium sits past the
+      // threshold, so the lean is dragged back over the line.
+      var ticks = 0;
+      while (s.phase == GamePhase.critical && ticks < 2000) {
+        loop.tick(1 / 120, const [BalanceEvent(BalanceInput(roll: 1.0))]);
+        ticks++;
+      }
+      expect(s.phase, GamePhase.toppling);
+      expect(s.tower, hasLength(1)); // full jumble
+    });
+
+    test('doing nothing lets the window expire into a collapse', () {
+      // Zero-stiffness spring: the lean neither recovers nor grows, so ONLY
+      // the window timer can end the critical phase.
+      const frozen = TuningConfig(
+        restoringStiffness: 0,
+        wobbleDamping: 0,
+      );
+      final loop = _newRun(frozen);
+      final s = loop.state;
+      loop.startRun(balanceMode: true);
+      _stack(loop, 4);
+
+      s.leanLateral = frozen.toppleThreshold + 0.05;
+      loop.tick(1 / 120, const []);
+      expect(s.phase, GamePhase.critical);
+
+      final windowTicks = (frozen.saveWindow * 120).ceil() + 5;
+      for (var i = 0; i < windowTicks; i++) {
+        loop.tick(1 / 120, const []);
+      }
+      expect(s.phase, GamePhase.toppling); // time ran out
     });
   });
 

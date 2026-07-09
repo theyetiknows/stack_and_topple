@@ -36,6 +36,7 @@ class GameOverlays extends StatelessWidget {
               onTap: onStart,
             );
           case GamePhase.sweeping:
+          case GamePhase.critical:
           case GamePhase.toppling:
           case GamePhase.ending:
             return const SizedBox.shrink();

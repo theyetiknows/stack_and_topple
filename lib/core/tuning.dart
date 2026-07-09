@@ -77,9 +77,15 @@ class TuningConfig {
   /// Initial spin (rad/s), signed away from the tower.
   final double debrisSpin;
 
-  /// Seconds a debris piece lives before being culled (it is off-screen long
-  /// before this; lifetime culling keeps the core camera-agnostic).
+  /// Seconds a debris piece lives before being culled (long enough to land,
+  /// settle and fade; lifetime culling keeps the core camera-agnostic).
   final double debrisLifetime;
+
+  /// Bounciness when debris hits the ground plane (0 = thud, 1 = superball).
+  final double debrisRestitution;
+
+  /// Horizontal velocity kept after a ground bounce (slide friction).
+  final double debrisGroundFriction;
 
   /// Pause after a total miss so the player watches the piece fall before the
   /// game-over card appears.
@@ -108,18 +114,37 @@ class TuningConfig {
   final double leanOffsetGain;
 
   // ---------------------------------------------------------------------------
-  // Topple
+  // Topple, collapse & saves
+  //
+  // Crossing the threshold no longer rigidly rotates the tower. Classic mode:
+  // the tower breaks apart — every block tumbles individually (Jenga-style)
+  // and settles on the ground. Balance Mode: the tower first SHEDS its top
+  // blocks and enters a short SAVE window — pull the lean back level and the
+  // run continues from the lower height; fail (or re-tip) and it all comes
+  // down.
   // ---------------------------------------------------------------------------
 
-  /// Lean magnitude ‖(Lx, Lz)‖ beyond this (radians) topples the tower.
+  /// Lean magnitude ‖(Lx, Lz)‖ beyond this (radians) destabilises the tower.
   /// ~0.38 rad ≈ 22°. (With Balance OFF, Lz is always 0, so this is just |Lx|.)
   final double toppleThreshold;
 
-  /// Seconds of "falling over" animation before the run ends (juice).
-  final double toppleAnimDuration;
+  /// Seconds the collapse jumble plays before the game-over card.
+  final double collapseDuration;
 
-  /// Angular acceleration (rad/s^2) applied during the topple animation.
-  final double toppleFallAccel;
+  /// Fraction of the stacked blocks shed when Balance Mode catches a topple
+  /// (minimum 1; if fewer than 2 blocks would remain, it is a full collapse).
+  final double shedFraction;
+
+  /// After a shed, the lean magnitude is clamped to this fraction of the
+  /// threshold — critical, but physically saveable.
+  final double criticalLeanFactor;
+
+  /// Seconds the player has to steady the tower during the SAVE window.
+  final double saveWindow;
+
+  /// The save succeeds when the lean magnitude drops below
+  /// threshold * saveRecoveryFactor.
+  final double saveRecoveryFactor;
 
   // ---------------------------------------------------------------------------
   // Feedback / effects timers (presentation reads these; core just counts down)
@@ -206,6 +231,18 @@ class TuningConfig {
   /// Extra points awarded for a perfect drop (on top of the +1 for placing).
   final int perfectBonus;
 
+  /// One-time bonus for reaching a difficulty level for the first time in a
+  /// run (tracked by highest level awarded, so shedding and re-climbing the
+  /// same levels cannot farm it).
+  final int levelBonus;
+
+  /// Bonus for a successful Balance-Mode save.
+  final int saveBonus;
+
+  /// Points lost per block that falls off the tower (charged when blocks are
+  /// shed; a terminal full collapse does not additionally zero the score).
+  final int fallenBlockPenalty;
+
   const TuningConfig({
     this.blockHeight = 1.0,
     this.visualBlockDepth = 0.55,
@@ -221,15 +258,20 @@ class TuningConfig {
     this.debrisGravity = 26.0,
     this.debrisKickVx = 1.4,
     this.debrisSpin = 3.2,
-    this.debrisLifetime = 2.5,
+    this.debrisLifetime = 4.0,
+    this.debrisRestitution = 0.35,
+    this.debrisGroundFriction = 0.7,
     this.missEndDelay = 0.9,
     this.restoringStiffness = 42.0,
     this.wobbleDamping = 5.5,
     this.dropKickGain = 0.9,
     this.leanOffsetGain = 0.06,
     this.toppleThreshold = 0.38,
-    this.toppleAnimDuration = 1.1,
-    this.toppleFallAccel = 9.0,
+    this.collapseDuration = 1.4,
+    this.shedFraction = 0.34,
+    this.criticalLeanFactor = 0.9,
+    this.saveWindow = 1.6,
+    this.saveRecoveryFactor = 0.5,
     this.perfectFlashDuration = 0.55,
     this.dropBounceDuration = 0.16,
     this.impactShakeDuration = 0.28,
@@ -247,6 +289,9 @@ class TuningConfig {
     this.depthForeshorten = 0.055,
     this.depthShade = 0.35,
     this.perfectBonus = 2,
+    this.levelBonus = 5,
+    this.saveBonus = 8,
+    this.fallenBlockPenalty = 1,
   });
 }
 

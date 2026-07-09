@@ -9,15 +9,14 @@ import 'motion_types.dart';
 /// Browser motion source using the DeviceMotion API.
 ///
 /// iOS Safari gates DeviceMotion behind `DeviceMotionEvent.requestPermission()`
-/// which may only be called from a user gesture — our calibration tap. Safari
-/// also reports accelerationIncludingGravity with the OPPOSITE sign of the
-/// Android/Chrome convention; the permission gate only exists on iOS, so its
-/// presence doubles as the marker for when to flip signs.
+/// which may only be called from a user gesture — our calibration tap.
+/// Empirically (iPhone playtest 2026-07) Safari's accelerationIncludingGravity
+/// matches the standard convention, so NO sign flip is applied here; per-axis
+/// quirks on other devices are handled by rollSign/pitchSign in TuningConfig.
 class MotionSensor {
   final StreamController<MotionSample> _controller =
       StreamController.broadcast();
   JSFunction? _listener;
-  double _sign = 1;
 
   Stream<MotionSample> get samples => _controller.stream;
 
@@ -27,7 +26,6 @@ class MotionSensor {
     final gate = ctor.getProperty<JSFunction?>('requestPermission'.toJS);
     if (gate != null) {
       // iOS/iPadOS Safari path: must run inside a user gesture.
-      _sign = -1;
       try {
         final result =
             await (gate.callAsFunction(ctor)! as JSPromise<JSAny?>).toDart;
@@ -45,11 +43,7 @@ class MotionSensor {
     void onMotion(web.Event e) {
       final g = (e as web.DeviceMotionEvent).accelerationIncludingGravity;
       if (g == null) return;
-      _controller.add((
-        x: (g.x ?? 0) * _sign,
-        y: (g.y ?? 0) * _sign,
-        z: (g.z ?? 0) * _sign,
-      ));
+      _controller.add((x: g.x ?? 0, y: g.y ?? 0, z: g.z ?? 0));
     }
 
     _listener = onMotion.toJS;

@@ -4,11 +4,12 @@ A hyper-casual stacking game (V1 / MVP). Tap to drop falling blocks and stack
 them as high as you can before the tower topples. Built to produce short,
 filmable, shareable runs.
 
-> **Status: Increment B — Balance Mode + haptics.** The core loop (tap-drop,
-> exact-overlap slicing with falling debris, level-stepped difficulty,
-> pseudo-3D look) plus the opt-in tilt hard mode: calibrate to your holding
-> pose, then tilt to steady — or topple — the tower on BOTH the lateral and the
-> depth axis. Haptics throughout. Record & share is the next increment.
+> **Status: Increment B2 — collapses, saves & bonuses.** The core loop plus
+> Balance Mode, and now: towers break apart into a Jenga-style jumble that
+> lands and settles on the ground (no rigid spin); in Balance Mode an unstable
+> tower first SHEDS its top blocks and opens a SAVE window — steady it to keep
+> playing from the lower height. Scoring: level bonuses (once per level), save
+> bonuses, and a penalty per fallen block. Record & share is next.
 
 ## Run it
 
@@ -50,8 +51,11 @@ card: hold the phone the way you want to play and tap — that pose becomes the
 neutral baseline (works upright, flat, or lying on a couch). Tilt then DRIVES
 the tower's lean on two axes (roll → left/right, pitch → depth, rendered as a
 true-feeling 2.5D lean); tilting too far topples it, counter-tilting saves a
-leaning stack. Motion permission is requested only at that tap, never at
-launch.
+leaning stack. When the tower goes critical it sheds its top blocks and shows
+SAVE IT! — recover the lean inside the window to continue from the lower
+height (+bonus, minus a point per fallen block). Classic mode has no save:
+crossing the threshold collapses the whole tower. Motion permission is
+requested only at that tap, never at launch.
 
 Platform notes:
 - **iOS app**: needs `NSMotionUsageDescription` (already in Info.plist).
