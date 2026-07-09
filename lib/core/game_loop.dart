@@ -1,12 +1,13 @@
 import 'dart:math' as math;
 
 import 'block.dart';
+import 'debris.dart';
 import 'game_state.dart';
 import 'input/input_event.dart';
 import 'stability_model.dart';
 
 /// Advances the game one fixed step at a time. Owns the *stacking geometry*
-/// (sweep, overlap, platform shrink, spawning); delegates all *lean/topple
+/// (sweep, overlap slicing, debris, spawning); delegates all *lean/topple
 /// physics* to the injected [StabilityModel]. Pure Dart, deterministic w.r.t.
 /// (dt, events) — no Flutter, no rendering, no wall-clock, no randomness.
 class GameLoop {
@@ -21,6 +22,7 @@ class GameLoop {
     state.tower
       ..clear()
       ..add(Block(centerX: 0, width: t.initialBlockWidth, index: 0));
+    state.debris.clear();
     state.pieceCenterX = -t.sweepHalfRange;
     state.sweepDir = 1;
     state.leanLateral = 0;
@@ -29,17 +31,32 @@ class GameLoop {
     state.leanDepthVel = 0;
     state.score = 0;
     state.blocksPlaced = 0;
+    state.perfectDrops = 0;
     state.lastDropPerfect = false;
+    state.perfectFlashTimer = 0;
+    state.dropBounceTimer = 0;
+    state.impactShakeTimer = 0;
     state.toppleTimer = 0;
     state.toppleDir = 1;
+    state.endTimer = 0;
     state.phase = GamePhase.sweeping;
   }
 
   /// Advance by [dt] seconds, consuming [events] (drops / balance).
   void tick(double dt, List<InputEvent> events) {
+    // Debris and feedback timers animate in every phase (they are cosmetic and
+    // must keep moving while a miss falls or the game-over card appears).
+    _updateDebris(dt);
+    _decayTimers(dt);
+
     switch (state.phase) {
       case GamePhase.ready:
       case GamePhase.gameOver:
+        return;
+
+      case GamePhase.ending:
+        state.endTimer -= dt;
+        if (state.endTimer <= 0) state.phase = GamePhase.gameOver;
         return;
 
       case GamePhase.toppling:
@@ -55,7 +72,7 @@ class GameLoop {
             _performDrop();
           }
         }
-        if (state.phase != GamePhase.sweeping) return; // a drop may have toppled
+        if (state.phase != GamePhase.sweeping) return; // drop ended the run
         _advanceSweep(dt);
         stability.integrate(state, dt, _latestBalance(events));
         return;
@@ -72,11 +89,7 @@ class GameLoop {
 
   void _advanceSweep(double dt) {
     final t = state.tuning;
-    final speed = math.min(
-      t.baseSweepSpeed + t.sweepSpeedPerBlock * state.blocksPlaced,
-      t.maxSweepSpeed,
-    );
-    state.pieceCenterX += state.sweepDir * speed * dt;
+    state.pieceCenterX += state.sweepDir * state.currentSweepSpeed * dt;
     if (state.pieceCenterX > t.sweepHalfRange) {
       state.pieceCenterX = t.sweepHalfRange;
       state.sweepDir = -1;
@@ -89,15 +102,30 @@ class GameLoop {
   void _performDrop() {
     final t = state.tuning;
     final top = state.top;
+    final pieceHeight = t.blockHeight;
+    // The dropped piece lands on top of the current stack surface.
+    final landBottomY = (top.index + 1) * t.blockHeight;
 
     final overlapLeft = math.max(state.pieceLeft, top.left);
     final overlapRight = math.min(state.pieceRight, top.right);
     final overlapWidth = overlapRight - overlapLeft;
 
-    // Total miss: the piece doesn't touch the tower at all.
+    // Total miss: the whole piece sails past the tower and falls away.
     if (overlapWidth <= 0) {
       state.lastDropPerfect = false;
-      _startTopple((state.pieceCenterX - top.centerX).sign.toInt());
+      final side = (state.pieceCenterX - top.centerX).sign;
+      state.debris.add(Debris(
+        centerX: state.pieceCenterX,
+        bottomY: landBottomY,
+        width: state.pieceWidth,
+        height: pieceHeight,
+        vx: side * t.debrisKickVx,
+        vy: 0,
+        angVel: side * t.debrisSpin,
+      ));
+      state.impactShakeTimer = t.impactShakeDuration;
+      state.phase = GamePhase.ending;
+      state.endTimer = t.missEndDelay;
       return;
     }
 
@@ -107,23 +135,43 @@ class GameLoop {
     final double newWidth;
     final double newCenter;
     if (isPerfect) {
-      // Reward: keep the full platform and snap to alignment.
+      // Reward: no slice, keep the full platform and snap to alignment.
       newWidth = top.width;
       newCenter = top.centerX;
       state.score += 1 + t.perfectBonus;
+      state.perfectDrops += 1;
       state.lastDropPerfect = true;
+      state.perfectFlashTimer = t.perfectFlashDuration;
     } else {
-      // shrinkFactor blends between "keep full width" (0) and "slice to the
-      // overlap" (1) — the forgiveness dial.
-      newWidth = top.width - t.shrinkFactor * (top.width - overlapWidth);
+      // Slice to the EXACT overlap: the kept part stays precisely where the
+      // piece landed, and the overhang breaks off as visible falling debris —
+      // so the cut always lines up with what the player saw.
+      newWidth = overlapWidth;
       newCenter = (overlapLeft + overlapRight) / 2;
       state.score += 1;
       state.lastDropPerfect = false;
+
+      final overhangRight = misalign > 0;
+      final double debrisLeft = overhangRight ? overlapRight : state.pieceLeft;
+      final double debrisRight = overhangRight ? state.pieceRight : overlapLeft;
+      final side = overhangRight ? 1.0 : -1.0;
+      state.debris.add(Debris(
+        centerX: (debrisLeft + debrisRight) / 2,
+        bottomY: landBottomY,
+        width: debrisRight - debrisLeft,
+        height: pieceHeight,
+        vx: side * t.debrisKickVx,
+        vy: 0,
+        angVel: side * t.debrisSpin,
+      ));
+
       // Destabilise: normalise by platform width so tighter towers punish harder.
       stability.applyDropImpulse(state, misalign / top.width);
+      state.impactShakeTimer = t.impactShakeDuration;
     }
 
     state.blocksPlaced += 1;
+    state.dropBounceTimer = t.dropBounceDuration;
     state.tower.add(Block(
       centerX: newCenter,
       width: newWidth,
@@ -139,6 +187,24 @@ class GameLoop {
     // Spawn the next piece at the left edge, sweeping right.
     state.pieceCenterX = -t.sweepHalfRange;
     state.sweepDir = 1;
+  }
+
+  void _updateDebris(double dt) {
+    final t = state.tuning;
+    for (final d in state.debris) {
+      d.age += dt;
+      d.vy -= t.debrisGravity * dt; // world Y is up; gravity pulls down
+      d.bottomY += d.vy * dt;
+      d.centerX += d.vx * dt;
+      d.rotation += d.angVel * dt;
+    }
+    state.debris.removeWhere((d) => d.age > t.debrisLifetime);
+  }
+
+  void _decayTimers(double dt) {
+    if (state.perfectFlashTimer > 0) state.perfectFlashTimer -= dt;
+    if (state.dropBounceTimer > 0) state.dropBounceTimer -= dt;
+    if (state.impactShakeTimer > 0) state.impactShakeTimer -= dt;
   }
 
   void _startTopple(int dir) {

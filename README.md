@@ -31,12 +31,16 @@ Requires Flutter (stable, 3.44+). Everything is one codebase (Dart).
 Edit a value and hot-reload (press `r` in `flutter run`) to feel the change
 instantly, without touching rendering or input. The most important dials:
 
-- `shrinkFactor` — the forgiveness slider: `1.0` = hard "slice to the overlap"
-  (fast, unforgiving), `0.0` = no shrink (mistakes only add wobble).
-- `perfectTolerance` — how generous a "perfect" (no-loss) drop is.
+- `perfectTolerance` — the forgiveness lever: how generous a "perfect" (no-loss)
+  drop is. Imperfect drops slice to the exact overlap and the overhang visibly
+  falls away as debris.
+- `levelSize` / `sweepSpeedPerLevel` — the difficulty graduation: every
+  `levelSize` blocks the sweep speed takes a chunky step up.
+- `baseSweepSpeed` / `sweepSpeedPerBlock` / `maxSweepSpeed` — starting speed,
+  smooth creep, and the cap.
 - `restoringStiffness` / `wobbleDamping` — how the tower wobbles and self-rights.
 - `toppleThreshold` — how far it can lean before it falls.
-- `baseSweepSpeed` / `sweepSpeedPerBlock` — starting difficulty and the ramp.
+- `debrisGravity` / `debrisSpin` — how the sliced-off pieces tumble (cosmetic).
 
 ## Architecture (short version)
 

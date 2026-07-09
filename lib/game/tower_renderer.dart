@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 
+import '../core/debris.dart';
 import '../core/game_state.dart';
 import '../core/tuning.dart';
 
 /// Draws the tower from a read-only [GameState] snapshot. Pure presentation: it
 /// never mutates game state.
 ///
-/// Rendering is hand-rolled on the canvas (rather than via Flame components) so
-/// we own the camera and the tower transform directly. Increment A draws a
-/// near-flat side view; the depth (`Lz`) foreshortening that turns this into the
-/// 2.5D perspective is a localized addition here in Increment B — the world→screen
-/// mapping and the lean pivot are already structured for it.
+/// The look is a hand-rolled pseudo-3D: each block is drawn as a lit front face,
+/// a highlighted top face and a shaded side face, receding up-right. This is the
+/// first slice of the planned 2.5D presentation — the same face geometry is what
+/// depth-lean (`Lz`) will skew in Balance Mode. The sky gradient drifts with
+/// height so each difficulty level visibly reads as a new tier.
 class TowerPainter {
   TowerPainter({
     required this.state,
@@ -28,52 +29,52 @@ class TowerPainter {
   final double width;
   final double height;
 
+  // Screen direction (unit-ish) in which the pseudo-3D depth recedes.
+  static const double _depthDirX = 0.78;
+  static const double _depthDirY = -0.52;
+
+  late final double _scale = width / (2 * tuning.sweepHalfRange + 2.0);
+  late final double _anchorScreenY = height * 0.62;
+  late final double _depthPx = tuning.visualBlockDepth * _scale;
+
+  double _sx(double wx) => width / 2 + wx * _scale;
+  // Higher world-Y renders higher on screen (smaller screen-Y).
+  double _sy(double wy) => _anchorScreenY + (cameraY - wy) * _scale;
+
   void paint(Canvas canvas) {
     if (width <= 0 || height <= 0) return;
-    final t = tuning;
 
-    // World→screen mapping. Horizontal view spans the sweep range plus a margin.
-    final viewWorldWidth = 2 * t.sweepHalfRange + 2.0;
-    final scale = width / viewWorldWidth;
-    final anchorScreenY = height * 0.62; // where `cameraY` lands on screen
-
-    double sx(double wx) => width / 2 + wx * scale;
-    // Higher world-Y renders higher on screen (smaller screen-Y).
-    double sy(double wy) => anchorScreenY + (cameraY - wy) * scale;
-
-    // Background + ground.
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, width, height),
-      Paint()..color = const Color(0xFF10141C),
-    );
-    final groundY = sy(0);
-    canvas.drawRect(
-      Rect.fromLTRB(0, groundY, width, height),
-      Paint()..color = const Color(0xFF0B0E14),
-    );
-    canvas.drawLine(
-      Offset(0, groundY),
-      Offset(width, groundY),
-      Paint()
-        ..color = const Color(0x22FFFFFF)
-        ..strokeWidth = 1,
-    );
+    _paintSky(canvas);
+    _paintGround(canvas);
 
     // The whole tower tilts by the lean angle, pivoting about the base centre.
     // (+lean = leaning right; canvas.rotate is clockwise for +angle in y-down.)
-    final pivot = Offset(sx(0), sy(0));
+    final pivot = Offset(_sx(0), _sy(0));
     canvas.save();
     canvas.translate(pivot.dx, pivot.dy);
     canvas.rotate(state.leanLateral);
     canvas.translate(-pivot.dx, -pivot.dy);
 
-    // Placed blocks, base upward.
+    // Placed blocks, base upward (higher blocks correctly occlude the top faces
+    // of the ones beneath them).
     for (final b in state.tower) {
-      final bottomY = b.index * t.blockHeight;
-      final topY = bottomY + t.blockHeight;
-      _drawBlock(
+      final isTop = identical(b, state.tower.last);
+      // Landing squash: the just-placed block compresses and springs back.
+      var blockH = tuning.blockHeight;
+      if (isTop && state.dropBounceTimer > 0 && state.blocksPlaced > 0) {
+        final p =
+            (state.dropBounceTimer / tuning.dropBounceDuration).clamp(0.0, 1.0);
+        blockH *= 1 - 0.22 * p;
+      }
+      final bottomY = b.index * tuning.blockHeight;
+      _drawBlock3D(
         canvas,
-        Rect.fromLTRB(sx(b.left), sy(topY), sx(b.right), sy(bottomY)),
+        Rect.fromLTRB(
+          _sx(b.left),
+          _sy(bottomY + blockH),
+          _sx(b.right),
+          _sy(bottomY),
+        ),
         b.index,
         active: false,
       );
@@ -81,42 +82,202 @@ class TowerPainter {
 
     // The sweeping piece hovers one block-height above the current top.
     if (state.phase == GamePhase.sweeping) {
-      final bottomY = (state.blocksPlaced + 1) * t.blockHeight;
-      final topY = bottomY + t.blockHeight;
-      _drawBlock(
+      final bottomY = (state.blocksPlaced + 1) * tuning.blockHeight;
+      _drawBlock3D(
         canvas,
         Rect.fromLTRB(
-            sx(state.pieceLeft), sy(topY), sx(state.pieceRight), sy(bottomY)),
+          _sx(state.pieceLeft),
+          _sy(bottomY + tuning.blockHeight),
+          _sx(state.pieceRight),
+          _sy(bottomY),
+        ),
         state.blocksPlaced + 1,
         active: true,
       );
     }
 
+    // PERFECT: an expanding ring pulsing out of the just-placed block.
+    if (state.perfectFlashTimer > 0 && state.tower.isNotEmpty) {
+      final p = (state.perfectFlashTimer / tuning.perfectFlashDuration)
+          .clamp(0.0, 1.0);
+      final top = state.tower.last;
+      final c = Offset(
+        _sx(top.centerX),
+        _sy(top.index * tuning.blockHeight + tuning.blockHeight / 2),
+      );
+      canvas.drawCircle(
+        c,
+        (1 - p) * _scale * 2.2 + _scale * 0.4,
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.55 * p)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3 + 5 * p,
+      );
+    }
+
     canvas.restore();
+
+    // Debris is detached from the tower, so it is drawn OUTSIDE the lean
+    // transform, tumbling in plain world space.
+    for (final d in state.debris) {
+      _drawDebris(canvas, d);
+    }
   }
 
-  void _drawBlock(Canvas canvas, Rect rect, int index, {required bool active}) {
-    final hue = (200 + index * 16) % 360;
-    final fill = HSVColor.fromAHSV(1, hue.toDouble(), 0.45, active ? 0.98 : 0.86)
-        .toColor();
-    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(3));
+  // --- Sky / ground -----------------------------------------------------------
 
-    canvas.drawRRect(rrect, Paint()..color = fill);
-    canvas.drawRRect(
-      rrect,
+  void _paintSky(Canvas canvas) {
+    // Hue drifts continuously with height; level steps are felt through speed
+    // while the sky records the climb. Slight overdraw hides camera-shake edges.
+    final rect = Rect.fromLTWH(-16, -16, width + 32, height + 32);
+    final hue = (222 + state.blocksPlaced * 3.0) % 360;
+    final topColor = HSVColor.fromAHSV(1, hue, 0.55, 0.13).toColor();
+    final bottomColor =
+        HSVColor.fromAHSV(1, (hue + 34) % 360, 0.42, 0.30).toColor();
+    canvas.drawRect(
+      rect,
       Paint()
-        ..color = const Color(0x22FFFFFF)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [topColor, bottomColor],
+        ).createShader(rect),
+    );
+
+    // A faint halo behind the tower keeps the action area luminous.
+    canvas.drawCircle(
+      Offset(width / 2, _anchorScreenY - height * 0.08),
+      width * 0.55,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            Colors.white.withValues(alpha: 0.07),
+            Colors.white.withValues(alpha: 0),
+          ],
+        ).createShader(
+          Rect.fromCircle(
+            center: Offset(width / 2, _anchorScreenY - height * 0.08),
+            radius: width * 0.55,
+          ),
+        ),
+    );
+  }
+
+  void _paintGround(Canvas canvas) {
+    final groundY = _sy(0);
+    if (groundY > height + 16) return;
+    final rect = Rect.fromLTRB(-16, groundY, width + 16, height + 16);
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [const Color(0xFF0A0D13), const Color(0xFF06080C)],
+        ).createShader(rect),
+    );
+    // Soft contact shadow under the base block.
+    if (state.tower.isNotEmpty) {
+      final base = state.tower.first;
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(_sx(base.centerX) + _depthPx * 0.4, groundY + 4),
+          width: (base.width * _scale) * 1.25,
+          height: 12,
+        ),
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.45)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+      );
+    }
+  }
+
+  // --- Blocks -------------------------------------------------------------------
+
+  Color _blockColor(int index, {required bool active}) {
+    final hue = (200 + index * 14) % 360;
+    return HSVColor.fromAHSV(1, hue.toDouble(), 0.48, active ? 0.98 : 0.88)
+        .toColor();
+  }
+
+  /// Front face at [front], with top and right faces receding by [_depthPx]
+  /// toward the upper-right — the pseudo-3D that makes the stack feel solid.
+  void _drawBlock3D(Canvas canvas, Rect front, int index,
+      {required bool active}) {
+    final base = _blockColor(index, active: active);
+    final topFace = Color.lerp(base, Colors.white, 0.32)!;
+    final sideFace = Color.lerp(base, Colors.black, 0.34)!;
+    final dx = _depthPx * _depthDirX;
+    final dy = _depthPx * _depthDirY;
+
+    // Top face.
+    canvas.drawPath(
+      Path()
+        ..moveTo(front.left, front.top)
+        ..lineTo(front.left + dx, front.top + dy)
+        ..lineTo(front.right + dx, front.top + dy)
+        ..lineTo(front.right, front.top)
+        ..close(),
+      Paint()..color = topFace,
+    );
+    // Right side face.
+    canvas.drawPath(
+      Path()
+        ..moveTo(front.right, front.top)
+        ..lineTo(front.right + dx, front.top + dy)
+        ..lineTo(front.right + dx, front.bottom + dy)
+        ..lineTo(front.right, front.bottom)
+        ..close(),
+      Paint()..color = sideFace,
+    );
+    // Front face last so it crisply overlaps the receding faces.
+    canvas.drawRect(front, Paint()..color = base);
+    // Subtle front-face vertical shading for volume.
+    canvas.drawRect(
+      front,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.white.withValues(alpha: 0.10),
+            Colors.black.withValues(alpha: 0.12),
+          ],
+        ).createShader(front),
     );
     if (active) {
-      canvas.drawRRect(
-        rrect,
+      canvas.drawRect(
+        front,
         Paint()
-          ..color = const Color(0xCCFFFFFF)
+          ..color = Colors.white.withValues(alpha: 0.85)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2,
       );
     }
+  }
+
+  void _drawDebris(Canvas canvas, Debris d) {
+    final w = d.width * _scale;
+    final h = d.height * _scale;
+    final center = Offset(_sx(d.centerX), _sy(d.bottomY + d.height / 2));
+    // Fade out near end-of-life so culling is invisible.
+    final life = 1 - (d.age / tuning.debrisLifetime);
+    final alpha = life.clamp(0, 1).toDouble();
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(d.rotation);
+    final front = Rect.fromCenter(center: Offset.zero, width: w, height: h);
+    final base =
+        _blockColor(state.blocksPlaced + 1, active: false).withValues(alpha: alpha);
+    canvas.drawRect(front, Paint()..color = base);
+    canvas.drawRect(
+      front,
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.25 * alpha)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+    canvas.restore();
   }
 }

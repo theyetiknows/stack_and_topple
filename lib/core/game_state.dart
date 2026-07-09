@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'block.dart';
+import 'debris.dart';
 import 'tuning.dart';
 
 /// The lifecycle of a single run.
@@ -11,6 +14,9 @@ enum GamePhase {
 
   /// The tower is falling over (topple animation), run about to end.
   toppling,
+
+  /// The piece missed entirely: brief beat while it falls, then game over.
+  ending,
 
   /// Run finished; show score + share.
   gameOver,
@@ -30,6 +36,9 @@ class GameState {
   /// Placed blocks, base first. `tower.last` is the current support surface.
   final List<Block> tower = [];
 
+  /// Sliced-off overhangs / missed pieces currently tumbling (cosmetic only).
+  final List<Debris> debris = [];
+
   // --- Active sweeping piece ---------------------------------------------------
   /// World-space X of the sweeping piece's centre.
   double pieceCenterX = 0;
@@ -48,12 +57,23 @@ class GameState {
   int score = 0;
   int blocksPlaced = 0;
 
+  /// Count of perfect drops this run (also drives the PERFECT flash in the HUD).
+  int perfectDrops = 0;
+
   /// True if the most recent drop was perfect (for feedback/juice).
   bool lastDropPerfect = false;
 
-  // --- Topple animation --------------------------------------------------------
+  // --- Effect timers (count down to 0; presentation reads them for juice) ------
+  double perfectFlashTimer = 0;
+  double dropBounceTimer = 0;
+  double impactShakeTimer = 0;
+
+  // --- Topple / ending ----------------------------------------------------------
   double toppleTimer = 0;
   int toppleDir = 1;
+
+  /// Countdown used by [GamePhase.ending] (watch-the-miss-fall beat).
+  double endTimer = 0;
 
   // --- Derived helpers ---------------------------------------------------------
   Block get top => tower.last;
@@ -66,4 +86,16 @@ class GameState {
   double get pieceRight => pieceCenterX + pieceWidth / 2;
 
   bool get isPlaying => phase == GamePhase.sweeping;
+
+  /// Difficulty tier: steps up every [TuningConfig.levelSize] placed blocks.
+  int get level => blocksPlaced ~/ tuning.levelSize;
+
+  /// Sweep speed for the current height: base + smooth per-block creep + a
+  /// chunky per-level step, capped so it stays humanly tappable.
+  double get currentSweepSpeed => math.min(
+        tuning.baseSweepSpeed +
+            tuning.sweepSpeedPerBlock * blocksPlaced +
+            tuning.sweepSpeedPerLevel * level,
+        tuning.maxSweepSpeed,
+      );
 }

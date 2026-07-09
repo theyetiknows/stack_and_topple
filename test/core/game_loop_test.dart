@@ -14,7 +14,7 @@ GameLoop _newRun([TuningConfig? tuning]) {
 
 void main() {
   group('drop resolution', () {
-    test('perfect drop keeps platform width and adds no lean', () {
+    test('perfect drop keeps platform width, no lean, no debris', () {
       final loop = _newRun();
       final s = loop.state;
       final w0 = s.top.width;
@@ -26,34 +26,93 @@ void main() {
       expect(s.leanLateralVel, 0);
       expect(s.leanLateral, 0);
       expect(s.lastDropPerfect, isTrue);
+      expect(s.perfectDrops, 1);
+      expect(s.debris, isEmpty);
       expect(s.score, 1 + s.tuning.perfectBonus);
     });
 
-    test('misaligned drop shrinks the platform and kicks the lean', () {
+    test('misaligned drop slices to the exact overlap and spawns debris', () {
       final loop = _newRun();
       final s = loop.state;
       final w0 = s.top.width;
-      s.pieceCenterX = s.top.centerX + 0.5; // beyond perfectTolerance
+      const off = 0.5; // beyond perfectTolerance
+      s.pieceCenterX = s.top.centerX + off;
+      final pieceW = s.pieceWidth;
       loop.tick(1 / 120, const [DropEvent()]);
 
       expect(s.blocksPlaced, 1);
-      expect(s.top.width, lessThan(w0));
+      // The kept part is EXACTLY the overlap — the cut lines up with the drop.
+      expect(s.top.width, closeTo(w0 - off, 1e-9));
+      expect(s.top.right, closeTo(w0 / 2, 1e-9)); // flush with old right edge
+      // The overhang broke off as debris; kept + debris == the dropped piece.
+      expect(s.debris, hasLength(1));
+      expect(s.debris.single.width, closeTo(off, 1e-9));
+      expect(s.top.width + s.debris.single.width, closeTo(pieceW, 1e-9));
       expect(s.leanLateralVel, greaterThan(0)); // kicked toward +x
       expect(s.lastDropPerfect, isFalse);
       expect(s.score, 1);
     });
 
-    test('total miss ends the run', () {
+    test('debris falls under gravity and is culled after its lifetime', () {
       final loop = _newRun();
       final s = loop.state;
+      s.pieceCenterX = s.top.centerX + 0.5;
+      loop.tick(1 / 120, const [DropEvent()]);
+      final d = s.debris.single;
+      final y0 = d.bottomY;
+
+      for (var i = 0; i < 60; i++) {
+        loop.tick(1 / 120, const []);
+      }
+      expect(d.bottomY, lessThan(y0)); // falling (world Y is up)
+
+      for (var i = 0; i < 1000 && s.debris.isNotEmpty; i++) {
+        loop.tick(1 / 60, const []);
+      }
+      expect(s.debris, isEmpty); // culled by lifetime
+    });
+
+    test('total miss: piece falls as debris, brief beat, then game over', () {
+      final loop = _newRun();
+      final s = loop.state;
+      final pieceW = s.pieceWidth;
       s.pieceCenterX = s.top.right + s.pieceWidth; // no overlap at all
       loop.tick(1 / 120, const [DropEvent()]);
-      expect(s.phase, GamePhase.toppling);
 
-      for (var i = 0; i < 1000 && s.phase == GamePhase.toppling; i++) {
+      expect(s.phase, GamePhase.ending); // watch-it-fall beat, not a topple
+      expect(s.debris, hasLength(1));
+      expect(s.debris.single.width, closeTo(pieceW, 1e-9));
+      expect(s.blocksPlaced, 0); // a miss places nothing
+
+      for (var i = 0; i < 1000 && s.phase == GamePhase.ending; i++) {
         loop.tick(1 / 60, const []);
       }
       expect(s.phase, GamePhase.gameOver);
+    });
+  });
+
+  group('difficulty ramp', () {
+    test('sweep speed takes a chunky step at each level boundary', () {
+      final s = GameState(const TuningConfig());
+      final t = s.tuning;
+
+      s.blocksPlaced = t.levelSize - 1; // last block of level 0
+      final beforeStep = s.currentSweepSpeed;
+      s.blocksPlaced = t.levelSize; // first block of level 1
+      final afterStep = s.currentSweepSpeed;
+
+      expect(s.level, 1);
+      expect(
+        afterStep - beforeStep,
+        closeTo(t.sweepSpeedPerLevel + t.sweepSpeedPerBlock, 1e-9),
+      );
+      expect(afterStep, lessThanOrEqualTo(t.maxSweepSpeed));
+    });
+
+    test('sweep speed is capped', () {
+      final s = GameState(const TuningConfig());
+      s.blocksPlaced = 10000;
+      expect(s.currentSweepSpeed, s.tuning.maxSweepSpeed);
     });
   });
 
@@ -88,7 +147,12 @@ void main() {
             (i % 40 == 0) ? const [DropEvent()] : const <InputEvent>[];
         loop.tick(1 / 120, events);
       }
-      return [s.score.toDouble(), s.tower.length.toDouble(), s.leanLateral];
+      return [
+        s.score.toDouble(),
+        s.tower.length.toDouble(),
+        s.debris.length.toDouble(),
+        s.leanLateral,
+      ];
     }
 
     expect(run(), equals(run()));

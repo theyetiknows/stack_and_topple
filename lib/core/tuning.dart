@@ -8,14 +8,22 @@
 /// Axis convention for the 2.5D design:
 ///   - "lateral" = left/right in screen space  (Lx) — active in the base game.
 ///   - "depth"   = toward/away from camera      (Lz) — dormant until Balance Mode.
-/// Increment A only exercises the lateral axis.
 class TuningConfig {
   // ---------------------------------------------------------------------------
   // Piece sweep & difficulty ramp
+  //
+  // Difficulty graduates in LEVELS: every [levelSize] placed blocks the sweep
+  // speed takes a noticeable step up (sweepSpeedPerLevel), on top of a small
+  // per-block creep (sweepSpeedPerBlock). The background also evolves with
+  // height so each graduation visibly reads as a new tier.
   // ---------------------------------------------------------------------------
 
   /// Vertical size of every block, in world units. Rendering maps this to pixels.
   final double blockHeight;
+
+  /// Visual depth of a block (world units) for the pseudo-3D faces. Presentation
+  /// only — it never affects collision or stability.
+  final double visualBlockDepth;
 
   /// Width of the starting platform (the base block).
   final double initialBlockWidth;
@@ -26,29 +34,56 @@ class TuningConfig {
   /// Horizontal sweep speed (world units / second) at the very bottom.
   final double baseSweepSpeed;
 
-  /// Added sweep speed for each successfully placed block — the tension ramp.
+  /// Small added sweep speed for each successfully placed block (smooth creep).
   final double sweepSpeedPerBlock;
+
+  /// Blocks per difficulty level.
+  final int levelSize;
+
+  /// Chunky speed step added at each level boundary — the felt "graduation".
+  final double sweepSpeedPerLevel;
 
   /// Hard cap on sweep speed so it never becomes literally untappable.
   final double maxSweepSpeed;
 
   // ---------------------------------------------------------------------------
-  // Drop resolution & "forgiveness" (the core feel knob)
+  // Drop resolution & forgiveness
+  //
+  // Imperfect drops slice the piece to the EXACT overlap with the platform: the
+  // kept part stays precisely where the piece landed and the overhang breaks
+  // off as visible falling debris. Forgiveness therefore lives in
+  // [perfectTolerance] (how generous a "no-loss" drop is), not in a shrink blend.
   // ---------------------------------------------------------------------------
 
-  /// |misalignment| <= this counts as a PERFECT drop: no platform loss, no lean
-  /// kick, and a score bonus. Bigger = more forgiving / easier to feel good.
+  /// |misalignment| <= this counts as a PERFECT drop: no slice, no lean kick,
+  /// snap to alignment, and a score bonus. Bigger = more forgiving.
   final double perfectTolerance;
 
-  /// How much of the overhang is sliced off the platform on an imperfect drop.
-  ///   1.0 = hard Ketchapp-style (new platform == overlap, unforgiving, fast death)
-  ///   0.0 = no shrink at all    (pure wobble mode — mistakes only add lean)
-  /// This single value slides us between the two "forgiveness" philosophies the
-  /// plan flagged as a product decision. Default is a deliberate blend.
-  final double shrinkFactor;
-
-  /// If a drop leaves the platform narrower than this, the tower fails structurally.
+  /// If a slice leaves the platform narrower than this, the tower fails
+  /// structurally and topples.
   final double minPlatformWidth;
+
+  // ---------------------------------------------------------------------------
+  // Sliced-debris cosmetics (the falling cut-off). Purely visual: debris never
+  // affects stability. World-space kinematics, deterministic.
+  // ---------------------------------------------------------------------------
+
+  /// Downward acceleration on debris (world units / s^2).
+  final double debrisGravity;
+
+  /// Sideways drift given to a sliced overhang, away from the tower.
+  final double debrisKickVx;
+
+  /// Initial spin (rad/s), signed away from the tower.
+  final double debrisSpin;
+
+  /// Seconds a debris piece lives before being culled (it is off-screen long
+  /// before this; lifetime culling keeps the core camera-agnostic).
+  final double debrisLifetime;
+
+  /// Pause after a total miss so the player watches the piece fall before the
+  /// game-over card appears.
+  final double missEndDelay;
 
   // ---------------------------------------------------------------------------
   // Lean / wobble dynamics
@@ -85,6 +120,19 @@ class TuningConfig {
   final double toppleFallAccel;
 
   // ---------------------------------------------------------------------------
+  // Feedback / effects timers (presentation reads these; core just counts down)
+  // ---------------------------------------------------------------------------
+
+  /// Duration of the expanding PERFECT ring/flash.
+  final double perfectFlashDuration;
+
+  /// Duration of the landing squash on the just-placed block.
+  final double dropBounceDuration;
+
+  /// Duration of the small camera shake after an imperfect drop.
+  final double impactShakeDuration;
+
+  // ---------------------------------------------------------------------------
   // Balance Mode (Increment B — unused in A, listed here so all dials live together)
   // ---------------------------------------------------------------------------
 
@@ -103,14 +151,21 @@ class TuningConfig {
 
   const TuningConfig({
     this.blockHeight = 1.0,
+    this.visualBlockDepth = 0.55,
     this.initialBlockWidth = 3.2,
     this.sweepHalfRange = 3.6,
     this.baseSweepSpeed = 4.2,
-    this.sweepSpeedPerBlock = 0.14,
-    this.maxSweepSpeed = 11.0,
+    this.sweepSpeedPerBlock = 0.10,
+    this.levelSize = 5,
+    this.sweepSpeedPerLevel = 0.9,
+    this.maxSweepSpeed = 13.0,
     this.perfectTolerance = 0.18,
-    this.shrinkFactor = 0.55,
     this.minPlatformWidth = 0.5,
+    this.debrisGravity = 26.0,
+    this.debrisKickVx = 1.4,
+    this.debrisSpin = 3.2,
+    this.debrisLifetime = 2.5,
+    this.missEndDelay = 0.9,
     this.restoringStiffness = 42.0,
     this.wobbleDamping = 5.5,
     this.dropKickGain = 0.9,
@@ -118,6 +173,9 @@ class TuningConfig {
     this.toppleThreshold = 0.38,
     this.toppleAnimDuration = 1.1,
     this.toppleFallAccel = 9.0,
+    this.perfectFlashDuration = 0.55,
+    this.dropBounceDuration = 0.16,
+    this.impactShakeDuration = 0.28,
     this.tiltGain = 2.2,
     this.tiltDeadZone = 0.03,
     this.perfectBonus = 2,

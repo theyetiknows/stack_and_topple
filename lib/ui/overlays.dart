@@ -33,6 +33,7 @@ class GameOverlays extends StatelessWidget {
             );
           case GamePhase.sweeping:
           case GamePhase.toppling:
+          case GamePhase.ending:
             return const SizedBox.shrink();
         }
       },
