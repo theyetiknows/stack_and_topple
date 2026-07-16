@@ -44,7 +44,7 @@ class Hud extends StatelessWidget {
               ),
               Align(
                 alignment: const Alignment(0, -0.25),
-                child: _LevelUpToast(
+                child: _MilestoneBanner(
                   level: game.level,
                   bonus: game.tuning.levelBonus,
                 ),
@@ -244,39 +244,124 @@ class _PerfectFlash extends StatelessWidget {
   }
 }
 
-/// Brief toast when the difficulty steps up a level (with its one-time bonus).
-class _LevelUpToast extends StatelessWidget {
-  const _LevelUpToast({required this.level, required this.bonus});
+/// Big, varied milestone banner: each level-up gets its own phrase and
+/// colour, scale-punches in, holds, and fades. Celebrates only genuine climbs
+/// (a shed/collapse level reset stays silent).
+class _MilestoneBanner extends StatefulWidget {
+  const _MilestoneBanner({required this.level, required this.bonus});
 
   final ValueNotifier<int> level;
   final int bonus;
 
   @override
+  State<_MilestoneBanner> createState() => _MilestoneBannerState();
+}
+
+class _MilestoneBannerState extends State<_MilestoneBanner> {
+  static const _phrases = [
+    'LEVEL UP!',
+    'ON FIRE!',
+    'NEW HEIGHTS!',
+    'UNSTOPPABLE!',
+    'SKY HIGH!',
+    'LEGENDARY!',
+  ];
+  static const _colors = [
+    Color(0xFF7C9EFF),
+    Color(0xFF4DD0C7),
+    Color(0xFFFF8A65),
+    Color(0xFF81C784),
+    Color(0xFFB388FF),
+    Color(0xFFFF5C8A),
+  ];
+
+  late int _lastLevel = widget.level.value;
+  int _celebration = 0; // re-keys the animation per climb
+  int _shownLevel = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.level.addListener(_onLevel);
+  }
+
+  @override
+  void dispose() {
+    widget.level.removeListener(_onLevel);
+    super.dispose();
+  }
+
+  void _onLevel() {
+    final v = widget.level.value;
+    final climbed = v > _lastLevel;
+    _lastLevel = v;
+    if (climbed) {
+      setState(() {
+        _shownLevel = v;
+        _celebration++;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<int>(
-      valueListenable: level,
-      builder: (context, value, _) {
-        if (value == 0) return const SizedBox.shrink();
-        return TweenAnimationBuilder<double>(
-          key: ValueKey(value),
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration: const Duration(milliseconds: 1100),
-          builder: (context, t, _) {
-            final opacity = t < 0.15 ? t / 0.15 : (1 - t) / 0.85;
-            return Opacity(
-              opacity: opacity.clamp(0, 1),
-              child: Text(
-                'LEVEL ${value + 1} — FASTER  +$bonus',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 2.0,
-                  color: Colors.white,
-                  shadows: [Shadow(blurRadius: 10, color: Colors.black87)],
+    if (_celebration == 0) return const SizedBox.shrink();
+    final phrase = _phrases[(_shownLevel - 1) % _phrases.length];
+    final color = _colors[(_shownLevel - 1) % _colors.length];
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(_celebration),
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 1500),
+      builder: (context, t, _) {
+        // Punch in fast, hold, fade out.
+        final appear = (t / 0.18).clamp(0.0, 1.0);
+        final opacity = t < 0.8 ? appear : (1 - t) / 0.2;
+        final scale = 0.5 + 0.5 * Curves.easeOutBack.transform(appear);
+        return Opacity(
+          opacity: opacity.clamp(0.0, 1.0),
+          child: Transform.scale(
+            scale: scale,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'LEVEL ${_shownLevel + 1}',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 4.0,
+                    color: Colors.white.withValues(alpha: 0.85),
+                    shadows: const [
+                      Shadow(blurRadius: 10, color: Colors.black87)
+                    ],
+                  ),
                 ),
-              ),
-            );
-          },
+                Text(
+                  phrase,
+                  style: TextStyle(
+                    fontSize: 40,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2.5,
+                    color: color,
+                    shadows: const [
+                      Shadow(blurRadius: 18, color: Colors.black87)
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '+${widget.bonus} BONUS',
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 2.5,
+                    color: Color(0xFFFFD54F),
+                    shadows: [Shadow(blurRadius: 10, color: Colors.black87)],
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );

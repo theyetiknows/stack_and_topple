@@ -83,6 +83,20 @@ void main() {
     expect(state.leanLateral, lessThan(0.1)); // rescued leftward
   });
 
+  test('drop impulses are amplified in Balance Mode (criticals reachable)', () {
+    model.applyDropImpulse(state, 0.3); // classic
+    final classicVel = state.leanLateralVel;
+
+    final balance = GameState(const TuningConfig())
+      ..phase = GamePhase.sweeping
+      ..balanceModeActive = true;
+    model.applyDropImpulse(balance, 0.3);
+    expect(
+      balance.leanLateralVel,
+      closeTo(classicVel * balance.tuning.balanceKickFactor, 1e-9),
+    );
+  });
+
   test('depth axis stays exactly zero with Balance Mode off', () {
     for (var i = 0; i < 1000; i++) {
       model.integrate(state, 1 / 120, const BalanceInput(pitch: 1.0));

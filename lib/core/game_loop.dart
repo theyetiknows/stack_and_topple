@@ -224,6 +224,7 @@ class GameLoop {
       vx: dir * (1.2 + 2.4 * h1) + (h2 - 0.5) * 1.6,
       vy: 0.8 + 2.2 * h2, // small upward pop before gravity wins
       angVel: dir * (1.2 + 2.8 * h3) * (h1 > 0.5 ? 1 : -1),
+      colorIndex: b.index, // fallen blocks keep their stacked colour
     ));
   }
 
@@ -266,6 +267,7 @@ class GameLoop {
         vx: side * t.debrisKickVx,
         vy: 0,
         angVel: side * t.debrisSpin,
+        colorIndex: top.index + 1,
       ));
       state.impactShakeTimer = t.impactShakeDuration;
       state.phase = GamePhase.ending;
@@ -307,6 +309,7 @@ class GameLoop {
         vx: side * t.debrisKickVx,
         vy: 0,
         angVel: side * t.debrisSpin,
+        colorIndex: top.index + 1,
       ));
 
       // Destabilise: normalise by platform width so tighter towers punish harder.

@@ -12,10 +12,33 @@ import '../input/tap_input_source.dart';
 import '../input/tilt_input_source.dart';
 import 'tower_renderer.dart';
 
+/// One confetti particle for milestone celebrations. Screen-space,
+/// presentation-only: bursts live ~1.5 s, so camera drift is imperceptible
+/// and the simulation never knows they exist.
+class _Confetti {
+  _Confetti({
+    required this.x,
+    required this.y,
+    required this.vx,
+    required this.vy,
+    required this.rotation,
+    required this.angVel,
+    required this.size,
+    required this.color,
+    required this.life,
+  });
+
+  double x, y, vx, vy, rotation, angVel;
+  final double size;
+  final Color color;
+  final double life;
+  double age = 0;
+}
+
 /// The Flame adapter: it owns the game loop, drives a fixed-timestep tick, and
 /// renders the read-only [GameState]. It contains NO game rules — all feel
-/// logic lives in the pure-Dart core. Phase/score/level/perfects are exposed
-/// as [ValueNotifier]s so Flutter overlays (HUD, cards) react without polling.
+/// logic lives in the pure-Dart core. Phase/score/level/perfects/saves are
+/// exposed as [ValueNotifier]s so Flutter overlays react without polling.
 class StackGame extends FlameGame {
   StackGame({TuningConfig? tuning}) : tuning = tuning ?? defaultTuning;
 
@@ -39,6 +62,15 @@ class StackGame extends FlameGame {
   double _cameraY = 0;
   double _shakePhase = 0; // presentation-only clock for the shake wiggle
 
+  // Sky crossfade between level palettes (presentation-only).
+  int _prevLevel = 0;
+  double _paletteBlend = 1;
+  static const double _paletteFadeSeconds = 0.8;
+
+  // Milestone confetti (presentation-only).
+  final List<_Confetti> _confetti = [];
+  int _confettiSeed = 0;
+
   /// Permission + baseline calibration for Balance Mode. Must be called from
   /// a user gesture (the calibration tap) — iOS Safari's motion permission
   /// only resolves inside one. Returns false if motion is unavailable/denied.
@@ -59,6 +91,9 @@ class StackGame extends FlameGame {
     loop.startRun(balanceMode: balanceMode && _tilt != null);
     _accum = 0;
     _cameraY = 0;
+    _prevLevel = 0;
+    _paletteBlend = 1;
+    _confetti.clear();
     _syncNotifiers();
   }
 
@@ -70,6 +105,11 @@ class StackGame extends FlameGame {
   @override
   void update(double dt) {
     super.update(dt);
+    _updateConfetti(dt);
+    if (_paletteBlend < 1) {
+      _paletteBlend =
+          math.min(1, _paletteBlend + dt / _paletteFadeSeconds);
+    }
     if (state.phase == GamePhase.ready) {
       _syncNotifiers();
       return;
@@ -119,18 +159,99 @@ class StackGame extends FlameGame {
       cameraY: _cameraY,
       width: size.x,
       height: size.y,
+      prevLevel: _prevLevel,
+      paletteBlend: _paletteBlend,
     ).paint(canvas);
+    _renderConfetti(canvas);
     canvas.restore();
+  }
+
+  // --- Milestone confetti -------------------------------------------------------
+
+  /// Cheap deterministic-ish hash for particle variation.
+  double _rand() {
+    _confettiSeed = (_confettiSeed * 1103515245 + 12345) & 0x7fffffff;
+    return _confettiSeed / 0x7fffffff;
+  }
+
+  /// Burst of coloured quads from a point; [tint] flavours ~2/3 of them and
+  /// the rest are white/gold for sparkle.
+  void _spawnBurst(Color tint, {int count = 42, double yFrac = 0.38}) {
+    if (size.x <= 0) return;
+    final origin = Offset(size.x / 2, size.y * yFrac);
+    for (var i = 0; i < count; i++) {
+      final angle = _rand() * math.pi * 2;
+      final speed = 140 + _rand() * 320;
+      final pick = _rand();
+      final color = pick < 0.62
+          ? tint
+          : (pick < 0.84 ? Colors.white : const Color(0xFFFFD54F));
+      _confetti.add(_Confetti(
+        x: origin.dx,
+        y: origin.dy,
+        vx: math.cos(angle) * speed,
+        vy: math.sin(angle) * speed - 160, // bias upward
+        rotation: _rand() * math.pi,
+        angVel: (_rand() - 0.5) * 14,
+        size: 5 + _rand() * 7,
+        color: color,
+        life: 1.1 + _rand() * 0.5,
+      ));
+    }
+  }
+
+  void _updateConfetti(double dt) {
+    for (final c in _confetti) {
+      c.age += dt;
+      c.vy += 640 * dt; // screen-space gravity (y-down)
+      c.x += c.vx * dt;
+      c.y += c.vy * dt;
+      c.rotation += c.angVel * dt;
+    }
+    _confetti.removeWhere((c) => c.age >= c.life);
+  }
+
+  void _renderConfetti(Canvas canvas) {
+    for (final c in _confetti) {
+      final t = (c.age / c.life).clamp(0.0, 1.0);
+      final alpha = t < 0.7 ? 1.0 : (1 - (t - 0.7) / 0.3);
+      canvas.save();
+      canvas.translate(c.x, c.y);
+      canvas.rotate(c.rotation);
+      canvas.drawRect(
+        Rect.fromCenter(
+            center: Offset.zero, width: c.size, height: c.size * 0.62),
+        Paint()..color = c.color.withValues(alpha: alpha),
+      );
+      canvas.restore();
+    }
   }
 
   void _syncNotifiers() {
     if (phase.value != state.phase) phase.value = state.phase;
     if (score.value != state.score) score.value = state.score;
-    if (level.value != state.level) level.value = state.level;
+
+    final newLevel = state.level;
+    if (newLevel != level.value) {
+      // Any level change re-keys the sky crossfade; only genuine climbs (not
+      // shed/collapse resets) get the celebration burst.
+      _prevLevel = level.value;
+      _paletteBlend = 0;
+      if (newLevel > level.value && state.phase == GamePhase.sweeping) {
+        _spawnBurst(paletteForLevel(newLevel).accent);
+      }
+      level.value = newLevel;
+    }
+
     if (perfectDrops.value != state.perfectDrops) {
       perfectDrops.value = state.perfectDrops;
     }
-    if (saves.value != state.saves) saves.value = state.saves;
+    if (saves.value != state.saves) {
+      if (state.saves > saves.value) {
+        _spawnBurst(const Color(0xFF69F0AE), count: 30, yFrac: 0.45);
+      }
+      saves.value = state.saves;
+    }
   }
 
   @override

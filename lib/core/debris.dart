@@ -1,4 +1,4 @@
-/// A sliced-off overhang (or a fully missed piece) tumbling away.
+/// A sliced-off overhang, missed piece, or collapsed block tumbling away.
 ///
 /// Debris is purely cosmetic — it never affects stability or scoring — but it
 /// lives in the core so its motion is deterministic and testable, and so the
@@ -13,6 +13,7 @@ class Debris {
     required this.vx,
     required this.vy,
     required this.angVel,
+    required this.colorIndex,
   });
 
   double centerX;
@@ -22,6 +23,10 @@ class Debris {
 
   final double width;
   final double height;
+
+  /// Tower colour slot this piece fell from, so a fallen block keeps the exact
+  /// colour it had while stacked.
+  final int colorIndex;
 
   double vx;
   double vy;

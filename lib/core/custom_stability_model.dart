@@ -51,8 +51,11 @@ class CustomStabilityModel implements StabilityModel {
   void applyDropImpulse(GameState state, double normalizedMisalign) {
     final t = state.tuning;
     // A velocity kick (visible wobble) plus a small static lean offset.
-    // Drops only ever attack the lateral axis — by design.
-    state.leanLateralVel += normalizedMisalign * t.dropKickGain;
-    state.leanLateral += normalizedMisalign * t.leanOffsetGain;
+    // Drops only ever attack the lateral axis — by design. In Balance Mode the
+    // kick is amplified: the softer spring would otherwise absorb mistakes,
+    // and criticals (and thus saves) would never actually occur in play.
+    final kick = state.balanceModeActive ? t.balanceKickFactor : 1.0;
+    state.leanLateralVel += normalizedMisalign * t.dropKickGain * kick;
+    state.leanLateral += normalizedMisalign * t.leanOffsetGain * kick;
   }
 }

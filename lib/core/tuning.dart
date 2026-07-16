@@ -207,6 +207,12 @@ class TuningConfig {
   /// lazier self-righting = the player's tilt matters more).
   final double balanceStiffnessFactor;
 
+  /// Multiplier on drop impulses while Balance Mode is active. >1 makes
+  /// sloppy drops genuinely threaten a critical (and therefore make saves
+  /// actually happen in play) — the soft balance-mode spring would otherwise
+  /// absorb them.
+  final double balanceKickFactor;
+
   /// Multiplier on [wobbleDamping] while Balance Mode is active.
   final double balanceDampingFactor;
 
@@ -278,12 +284,13 @@ class TuningConfig {
     this.tiltLeanTarget = 0.55,
     this.tiltLeanTargetPitch = 0.46,
     this.tiltDeadZone = 0.06,
-    this.tiltMaxAngle = 0.35,
-    this.tiltSmoothing = 0.22,
+    this.tiltMaxAngle = 0.22,
+    this.tiltSmoothing = 0.30,
     this.calibrationSamples = 15,
     this.rollSign = 1.0,
     this.pitchSign = 1.0,
-    this.balanceStiffnessFactor = 0.45,
+    this.balanceStiffnessFactor = 0.35,
+    this.balanceKickFactor = 2.2,
     this.balanceDampingFactor = 0.8,
     this.depthLeanVisualGain = 1.0,
     this.depthForeshorten = 0.055,

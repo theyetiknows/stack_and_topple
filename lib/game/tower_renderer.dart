@@ -6,14 +6,39 @@ import '../core/debris.dart';
 import '../core/game_state.dart';
 import '../core/tuning.dart';
 
+/// One sky/world colour scheme. Levels cycle through [kLevelPalettes], so
+/// every graduation lands the player in a visibly new world.
+class LevelPalette {
+  const LevelPalette(this.top, this.bottom, this.accent);
+  final Color top;
+  final Color bottom;
+  final Color accent;
+}
+
+/// Curated dark-friendly palettes, cycled by `level % length`. The accent
+/// tints the halo and the level-up confetti.
+const List<LevelPalette> kLevelPalettes = [
+  LevelPalette(Color(0xFF131A2E), Color(0xFF23304F), Color(0xFF7C9EFF)), // indigo night
+  LevelPalette(Color(0xFF0E2426), Color(0xFF14524E), Color(0xFF4DD0C7)), // teal dawn
+  LevelPalette(Color(0xFF2A1230), Color(0xFF66323F), Color(0xFFFF8A65)), // sunset ember
+  LevelPalette(Color(0xFF10241A), Color(0xFF2F5D3A), Color(0xFF81C784)), // forest dusk
+  LevelPalette(Color(0xFF1B1030), Color(0xFF45276B), Color(0xFFB388FF)), // royal violet
+  LevelPalette(Color(0xFF260F17), Color(0xFF6E2438), Color(0xFFFF5C8A)), // crimson sky
+  LevelPalette(Color(0xFF241B0C), Color(0xFF6B4A1F), Color(0xFFFFD54F)), // golden hour
+  LevelPalette(Color(0xFF0E1E2A), Color(0xFF275D75), Color(0xFF4FC3F7)), // arctic
+];
+
+LevelPalette paletteForLevel(int level) =>
+    kLevelPalettes[level % kLevelPalettes.length];
+
 /// Draws the tower from a read-only [GameState] snapshot. Pure presentation: it
 /// never mutates game state.
 ///
 /// The look is a hand-rolled pseudo-3D: each block is a lit front face plus a
 /// highlighted top and shaded side face receding up-right. The DEPTH lean (Lz,
-/// Balance Mode) projects onto that same receding diagonal: blocks displace
-/// along it with height, narrow slightly (foreshortening) and darken as they
-/// recede — so a depth topple visibly falls "into" or "out of" the screen.
+/// Balance Mode) projects onto that same receding diagonal. Debris tumbles as
+/// full 3D blocks (same three faces), keeping its stacked colour, and stays
+/// solid until the tail of its lifetime.
 class TowerPainter {
   TowerPainter({
     required this.state,
@@ -21,6 +46,8 @@ class TowerPainter {
     required this.cameraY,
     required this.width,
     required this.height,
+    required this.prevLevel,
+    required this.paletteBlend,
   });
 
   final GameState state;
@@ -30,6 +57,11 @@ class TowerPainter {
   final double cameraY;
   final double width;
   final double height;
+
+  /// Sky crossfade: the palette eases from [prevLevel]'s to the current
+  /// level's as [paletteBlend] runs 0→1 (driven by StackGame).
+  final int prevLevel;
+  final double paletteBlend;
 
   // Screen direction (unit-ish) in which the pseudo-3D depth recedes.
   static const double _depthDirX = 0.78;
@@ -44,8 +76,7 @@ class TowerPainter {
   double _sy(double wy) => _anchorScreenY + (cameraY - wy) * _scale;
 
   /// World-space displacement along the depth diagonal for a point at world
-  /// height [hWorld], given the current depth lean (sin keeps the topple
-  /// animation bounded as the angle grows).
+  /// height [hWorld], given the current depth lean.
   double _depthShiftWorld(double hWorld) =>
       math.sin(state.leanDepth) * hWorld * tuning.depthLeanVisualGain;
 
@@ -132,8 +163,7 @@ class TowerPainter {
     // SAVE window: pulsing red edge glow while the player fights to steady
     // the tower. Driven by the deterministic save timer, not wall-clock.
     if (state.phase == GamePhase.critical) {
-      final pulse =
-          0.28 + 0.18 * math.sin(state.saveWindowTimer * 12).abs();
+      final pulse = 0.28 + 0.18 * math.sin(state.saveWindowTimer * 12).abs();
       canvas.drawRect(
         Rect.fromLTWH(0, 0, width, height).deflate(3),
         Paint()
@@ -159,8 +189,7 @@ class TowerPainter {
     final dxPx = dz * _scale * _depthDirX;
     final dyPx = dz * _scale * _depthDirY;
     // Foreshorten: receding blocks narrow slightly, approaching ones widen.
-    final ws =
-        (1 - dz * tuning.depthForeshorten).clamp(0.55, 1.45).toDouble();
+    final ws = (1 - dz * tuning.depthForeshorten).clamp(0.55, 1.45).toDouble();
     final halfW = width * ws / 2;
     final front = Rect.fromLTRB(
       _sx(centerX - halfW) + dxPx,
@@ -168,21 +197,22 @@ class TowerPainter {
       _sx(centerX + halfW) + dxPx,
       _sy(bottomY) + dyPx,
     );
-    final shade =
-        dz > 0 ? math.min(tuning.depthShade, dz * 0.12) : 0.0;
+    final shade = dz > 0 ? math.min(tuning.depthShade, dz * 0.12) : 0.0;
     _drawBlock3D(canvas, front, index, active: active, shadeAlpha: shade);
   }
 
   // --- Sky / ground -----------------------------------------------------------
 
   void _paintSky(Canvas canvas) {
-    // Hue drifts continuously with height; level steps are felt through speed
-    // while the sky records the climb. Slight overdraw hides camera-shake edges.
+    // Each level is a distinct world colour; boundaries crossfade over
+    // paletteBlend. Slight overdraw hides camera-shake edges.
+    final from = paletteForLevel(prevLevel);
+    final to = paletteForLevel(state.level);
+    final topColor = Color.lerp(from.top, to.top, paletteBlend)!;
+    final bottomColor = Color.lerp(from.bottom, to.bottom, paletteBlend)!;
+    final accent = Color.lerp(from.accent, to.accent, paletteBlend)!;
+
     final rect = Rect.fromLTWH(-16, -16, width + 32, height + 32);
-    final hue = (222 + state.blocksPlaced * 3.0) % 360;
-    final topColor = HSVColor.fromAHSV(1, hue, 0.55, 0.13).toColor();
-    final bottomColor =
-        HSVColor.fromAHSV(1, (hue + 34) % 360, 0.42, 0.30).toColor();
     canvas.drawRect(
       rect,
       Paint()
@@ -193,21 +223,19 @@ class TowerPainter {
         ).createShader(rect),
     );
 
-    // A faint halo behind the tower keeps the action area luminous.
+    // A faint accent-tinted halo keeps the action area luminous.
+    final haloCenter = Offset(width / 2, _anchorScreenY - height * 0.08);
     canvas.drawCircle(
-      Offset(width / 2, _anchorScreenY - height * 0.08),
+      haloCenter,
       width * 0.55,
       Paint()
         ..shader = RadialGradient(
           colors: [
-            Colors.white.withValues(alpha: 0.07),
-            Colors.white.withValues(alpha: 0),
+            accent.withValues(alpha: 0.10),
+            accent.withValues(alpha: 0),
           ],
         ).createShader(
-          Rect.fromCircle(
-            center: Offset(width / 2, _anchorScreenY - height * 0.08),
-            radius: width * 0.55,
-          ),
+          Rect.fromCircle(center: haloCenter, radius: width * 0.55),
         ),
     );
   }
@@ -251,16 +279,21 @@ class TowerPainter {
 
   /// Front face at [front], with top and right faces receding by [_depthPx]
   /// toward the upper-right — the pseudo-3D that makes the stack feel solid.
+  /// [opacity] < 1 is used only by end-of-life debris fade.
   void _drawBlock3D(
     Canvas canvas,
     Rect front,
     int index, {
     required bool active,
     double shadeAlpha = 0,
+    double opacity = 1,
   }) {
-    final base = _blockColor(index, active: active);
-    final topFace = Color.lerp(base, Colors.white, 0.32)!;
-    final sideFace = Color.lerp(base, Colors.black, 0.34)!;
+    final base =
+        _blockColor(index, active: active).withValues(alpha: opacity);
+    final topFace =
+        Color.lerp(base, Colors.white, 0.32)!.withValues(alpha: opacity);
+    final sideFace =
+        Color.lerp(base, Colors.black, 0.34)!.withValues(alpha: opacity);
     final dx = _depthPx * _depthDirX;
     final dy = _depthPx * _depthDirY;
 
@@ -294,8 +327,8 @@ class TowerPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.white.withValues(alpha: 0.10),
-            Colors.black.withValues(alpha: 0.12),
+            Colors.white.withValues(alpha: 0.10 * opacity),
+            Colors.black.withValues(alpha: 0.12 * opacity),
           ],
         ).createShader(front),
     );
@@ -303,14 +336,14 @@ class TowerPainter {
     if (shadeAlpha > 0) {
       canvas.drawRect(
         front,
-        Paint()..color = Colors.black.withValues(alpha: shadeAlpha),
+        Paint()..color = Colors.black.withValues(alpha: shadeAlpha * opacity),
       );
     }
     if (active) {
       canvas.drawRect(
         front,
         Paint()
-          ..color = Colors.white.withValues(alpha: 0.85)
+          ..color = Colors.white.withValues(alpha: 0.85 * opacity)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2,
       );
@@ -321,24 +354,19 @@ class TowerPainter {
     final w = d.width * _scale;
     final h = d.height * _scale;
     final center = Offset(_sx(d.centerX), _sy(d.bottomY + d.height / 2));
-    // Fade out near end-of-life so culling is invisible.
-    final life = 1 - (d.age / tuning.debrisLifetime);
-    final alpha = life.clamp(0.0, 1.0);
+
+    // Solid for most of its life; fade only in the last quarter so culling is
+    // invisible but the wreckage never looks ghostly.
+    final lifeFrac = (d.age / tuning.debrisLifetime).clamp(0.0, 1.0);
+    final opacity =
+        lifeFrac < 0.75 ? 1.0 : (1 - (lifeFrac - 0.75) / 0.25).clamp(0.0, 1.0);
 
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(d.rotation);
     final front = Rect.fromCenter(center: Offset.zero, width: w, height: h);
-    final base = _blockColor(state.blocksPlaced + 1, active: false)
-        .withValues(alpha: alpha);
-    canvas.drawRect(front, Paint()..color = base);
-    canvas.drawRect(
-      front,
-      Paint()
-        ..color = Colors.black.withValues(alpha: 0.25 * alpha)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
-    );
+    // Same three-face 3D block as the tower, keeping its stacked colour.
+    _drawBlock3D(canvas, front, d.colorIndex, active: false, opacity: opacity);
     canvas.restore();
   }
 }
