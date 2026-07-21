@@ -140,11 +140,18 @@ class TuningConfig {
   final double criticalLeanFactor;
 
   /// Seconds the player has to steady the tower during the SAVE window.
+  /// During the window the lean is soft-walled just inside the threshold —
+  /// the tower cannot re-tip, so overcorrection costs time, never the run.
   final double saveWindow;
 
   /// The save succeeds when the lean magnitude drops below
-  /// threshold * saveRecoveryFactor.
+  /// threshold * saveRecoveryFactor...
   final double saveRecoveryFactor;
+
+  /// ...and STAYS there for this many continuous seconds. Without the dwell,
+  /// a hard opposite yank would trip the save while merely swinging through
+  /// centre on its way to the far side.
+  final double saveDwell;
 
   // ---------------------------------------------------------------------------
   // Feedback / effects timers (presentation reads these; core just counts down)
@@ -276,8 +283,9 @@ class TuningConfig {
     this.collapseDuration = 1.4,
     this.shedFraction = 0.34,
     this.criticalLeanFactor = 0.9,
-    this.saveWindow = 1.6,
+    this.saveWindow = 2.2,
     this.saveRecoveryFactor = 0.5,
+    this.saveDwell = 0.25,
     this.perfectFlashDuration = 0.55,
     this.dropBounceDuration = 0.16,
     this.impactShakeDuration = 0.28,

@@ -20,14 +20,17 @@ class GameLoop {
 
   /// (Re)start a run: reset to a single base block and begin sweeping.
   /// [balanceMode] arms the depth axis, the tilt→lean coupling, and saves.
-  void startRun({bool balanceMode = false}) {
+  /// [seed] drives the core RNG (spawn-side variety); the adapter passes
+  /// wall-clock entropy, tests pass constants — the core itself stays
+  /// deterministic w.r.t. (seed, dt, events).
+  void startRun({bool balanceMode = false, int seed = 1}) {
     final t = state.tuning;
     state.tower
       ..clear()
       ..add(Block(centerX: 0, width: t.initialBlockWidth, index: 0));
     state.debris.clear();
-    state.pieceCenterX = -t.sweepHalfRange;
-    state.sweepDir = 1;
+    state.rngState = (seed & 0x7fffffff) | 1; // never zero
+    _spawnPiece();
     state.leanLateral = 0;
     state.leanLateralVel = 0;
     state.leanDepth = 0;
@@ -44,6 +47,7 @@ class GameLoop {
     state.impactShakeTimer = 0;
     state.collapseTimer = 0;
     state.saveWindowTimer = 0;
+    state.saveDwellTimer = 0;
     state.saves = 0;
     state.highestLevelAwarded = 0;
     state.endTimer = 0;
@@ -108,8 +112,11 @@ class GameLoop {
   }
 
   /// The SAVE window: the tower is critically leaning; the player fights with
-  /// tilt. Recover below the safe zone → run continues from the lower height;
-  /// re-tip past the threshold or run out the window → full collapse.
+  /// tilt. The lean is SOFT-WALLED just inside the threshold for the whole
+  /// window — the natural panic overcorrection (which swings the lean toward
+  /// the far side) can no longer insta-kill the run. The save is decided
+  /// purely by: hold the lean inside the safe zone for [saveDwell] seconds
+  /// before the window expires; otherwise the tower collapses.
   void _tickCritical(double dt, List<InputEvent> events) {
     final t = state.tuning;
     for (final e in events) {
@@ -126,14 +133,30 @@ class GameLoop {
     );
     state.saveWindowTimer -= dt;
 
-    if (state.leanMagnitude > t.toppleThreshold) {
-      _fullCollapse();
-      return;
+    // Soft wall just inside the threshold: rescale the lean vector back and
+    // bleed velocity, so the tower strains against the edge instead of
+    // tipping over it.
+    final wall = t.toppleThreshold * 0.99;
+    final mag = state.leanMagnitude;
+    if (mag > wall) {
+      final scale = wall / mag;
+      state.leanLateral *= scale;
+      state.leanDepth *= scale;
+      state.leanLateralVel *= 0.5;
+      state.leanDepthVel *= 0.5;
     }
+
+    // Steady-inside-the-zone wins; merely swinging through centre does not.
     if (state.leanMagnitude < t.toppleThreshold * t.saveRecoveryFactor) {
-      _saveSuccess();
-      return;
+      state.saveDwellTimer += dt;
+      if (state.saveDwellTimer >= t.saveDwell) {
+        _saveSuccess();
+        return;
+      }
+    } else {
+      state.saveDwellTimer = 0;
     }
+
     if (state.saveWindowTimer <= 0) {
       _fullCollapse();
     }
@@ -165,17 +188,16 @@ class GameLoop {
 
     state.blocksPlaced = state.tower.length - 1;
     state.saveWindowTimer = t.saveWindow;
+    state.saveDwellTimer = 0;
     state.impactShakeTimer = t.impactShakeDuration;
     state.phase = GamePhase.critical;
   }
 
   void _saveSuccess() {
-    final t = state.tuning;
-    state.score += t.saveBonus;
+    state.score += state.tuning.saveBonus;
     state.saves += 1;
     // Resume building from the lower height.
-    state.pieceCenterX = -t.sweepHalfRange;
-    state.sweepDir = 1;
+    _spawnPiece();
     state.phase = GamePhase.sweeping;
   }
 
@@ -338,9 +360,21 @@ class GameLoop {
       return;
     }
 
-    // Spawn the next piece at the left edge, sweeping right.
-    state.pieceCenterX = -t.sweepHalfRange;
-    state.sweepDir = 1;
+    _spawnPiece();
+  }
+
+  /// Spawn the next sweeping piece from a random side (seeded RNG), entering
+  /// at the chosen edge and sweeping inward.
+  void _spawnPiece() {
+    state.sweepDir = _nextRand() < 0.5 ? 1 : -1;
+    state.pieceCenterX = -state.sweepDir * state.tuning.sweepHalfRange;
+  }
+
+  /// Core-side LCG in [0, 1); advances [GameState.rngState]. High bits only
+  /// (the division), so the classic LCG low-bit weakness never shows.
+  double _nextRand() {
+    state.rngState = (state.rngState * 1103515245 + 12345) & 0x7fffffff;
+    return state.rngState / 0x7fffffff;
   }
 
   void _updateDebris(double dt) {

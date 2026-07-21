@@ -160,8 +160,9 @@ class TowerPainter {
       _drawDebris(canvas, d);
     }
 
-    // SAVE window: pulsing red edge glow while the player fights to steady
-    // the tower. Driven by the deterministic save timer, not wall-clock.
+    // SAVE window: pulsing red edge glow + a countdown bar so the player can
+    // SEE the clock they are fighting. Driven by the deterministic save
+    // timer, not wall-clock.
     if (state.phase == GamePhase.critical) {
       final pulse = 0.28 + 0.18 * math.sin(state.saveWindowTimer * 12).abs();
       canvas.drawRect(
@@ -171,6 +172,29 @@ class TowerPainter {
           ..style = PaintingStyle.stroke
           ..strokeWidth = 6
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+      );
+
+      final frac =
+          (state.saveWindowTimer / tuning.saveWindow).clamp(0.0, 1.0);
+      final barMax = width * 0.56;
+      final barY = height * 0.30;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+              center: Offset(width / 2, barY), width: barMax, height: 7),
+          const Radius.circular(4),
+        ),
+        Paint()..color = Colors.black.withValues(alpha: 0.45),
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+              center: Offset(width / 2, barY),
+              width: barMax * frac,
+              height: 7),
+          const Radius.circular(4),
+        ),
+        Paint()..color = const Color(0xFFFF5252).withValues(alpha: 0.95),
       );
     }
   }

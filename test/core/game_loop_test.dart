@@ -216,18 +216,28 @@ void main() {
       expect(s.score, scoreBefore - shedPenalty + t.saveBonus);
     });
 
-    test('holding a hard adverse tilt re-tips into a full collapse', () {
+    test('holding an adverse tilt cannot re-tip mid-window; it collapses only '
+        'when the window expires', () {
       final loop = _newRun();
       final s = loop.state;
+      final t = s.tuning;
       loop.startRun(balanceMode: true);
       _stack(loop, 4);
 
-      s.leanLateral = s.tuning.toppleThreshold + 0.05;
+      s.leanLateral = t.toppleThreshold + 0.05;
       loop.tick(1 / 120, const []);
       expect(s.phase, GamePhase.critical);
 
-      // Player keeps tilting hard the wrong way: equilibrium sits past the
-      // threshold, so the lean is dragged back over the line.
+      // Half the window elapses under a hard adverse tilt: the soft wall
+      // holds the tower just inside the threshold — still saveable.
+      final halfWindow = (t.saveWindow * 120 * 0.5).floor();
+      for (var i = 0; i < halfWindow; i++) {
+        loop.tick(1 / 120, const [BalanceEvent(BalanceInput(roll: 1.0))]);
+      }
+      expect(s.phase, GamePhase.critical);
+      expect(s.leanMagnitude, lessThanOrEqualTo(t.toppleThreshold));
+
+      // Kept up until expiry, the run ends in the full jumble.
       var ticks = 0;
       while (s.phase == GamePhase.critical && ticks < 2000) {
         loop.tick(1 / 120, const [BalanceEvent(BalanceInput(roll: 1.0))]);
@@ -235,6 +245,35 @@ void main() {
       }
       expect(s.phase, GamePhase.toppling);
       expect(s.tower, hasLength(1)); // full jumble
+    });
+
+    test('panic overcorrection is survivable: the swing to the far side does '
+        'not collapse, and steadying afterwards still saves', () {
+      final loop = _newRun();
+      final s = loop.state;
+      final t = s.tuning;
+      loop.startRun(balanceMode: true);
+      _stack(loop, 4);
+
+      s.leanLateral = t.toppleThreshold + 0.05; // tipping right
+      loop.tick(1 / 120, const []);
+      expect(s.phase, GamePhase.critical);
+
+      // Panic: yank hard LEFT for 0.5 s. The lean swings through centre to
+      // the far wall — under the old rules this was an instant collapse.
+      for (var i = 0; i < 60; i++) {
+        loop.tick(1 / 120, const [BalanceEvent(BalanceInput(roll: -1.0))]);
+      }
+      expect(s.phase, GamePhase.critical); // survived the overcorrection
+
+      // Now steady the phone: dwell in the safe zone completes the save.
+      var ticks = 0;
+      while (s.phase == GamePhase.critical && ticks < 600) {
+        loop.tick(1 / 120, const [BalanceEvent(BalanceInput())]);
+        ticks++;
+      }
+      expect(s.phase, GamePhase.sweeping);
+      expect(s.saves, 1);
     });
 
     test('doing nothing lets the window expire into a collapse', () {
@@ -258,6 +297,46 @@ void main() {
         loop.tick(1 / 120, const []);
       }
       expect(s.phase, GamePhase.toppling); // time ran out
+    });
+  });
+
+  group('seeded spawn sides', () {
+    List<int> sidesFor(int seed) {
+      final loop = _newRun();
+      loop.startRun(seed: seed);
+      final s = loop.state;
+      final out = <int>[];
+      for (var i = 0; i < 12; i++) {
+        out.add(s.sweepDir);
+        s.pieceCenterX = s.top.centerX;
+        loop.tick(1 / 120, const [DropEvent()]);
+      }
+      return out;
+    }
+
+    test('pieces enter from both sides, at the matching edge', () {
+      final loop = _newRun();
+      loop.startRun(seed: 42);
+      final s = loop.state;
+      final seen = <int>{};
+      for (var i = 0; i < 12; i++) {
+        seen.add(s.sweepDir);
+        // The piece enters from the edge OPPOSITE its direction of travel
+        // (near the edge: the spawning tick already advanced one sub-step).
+        expect(s.pieceCenterX * s.sweepDir, lessThan(0));
+        expect(
+          s.pieceCenterX.abs(),
+          greaterThan(s.tuning.sweepHalfRange - 0.2),
+        );
+        s.pieceCenterX = s.top.centerX;
+        loop.tick(1 / 120, const [DropEvent()]);
+      }
+      expect(seen, {1, -1}); // both directions occur
+    });
+
+    test('same seed → same side sequence; different seed → different', () {
+      expect(sidesFor(42), equals(sidesFor(42)));
+      expect(sidesFor(42), isNot(equals(sidesFor(1337))));
     });
   });
 

@@ -89,6 +89,15 @@ class GameState {
   /// Remaining time in the SAVE window (GamePhase.critical).
   double saveWindowTimer = 0;
 
+  /// Time spent continuously inside the safe zone during the SAVE window —
+  /// the save requires STEADYING the tower, not just swinging through centre.
+  double saveDwellTimer = 0;
+
+  /// State of the core's seeded RNG (spawn-side variety). Seeded by
+  /// [GameLoop.startRun]; the core stays deterministic w.r.t. (seed, dt,
+  /// events) because entropy only ever enters through the seed.
+  int rngState = 1;
+
   /// Successful Balance-Mode saves this run (drives the SAVED! flash).
   int saves = 0;
 

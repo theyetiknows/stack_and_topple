@@ -88,7 +88,11 @@ class StackGame extends FlameGame {
   }
 
   void startRun({bool balanceMode = false}) {
-    loop.startRun(balanceMode: balanceMode && _tilt != null);
+    // Entropy enters the deterministic core only here, as the run seed.
+    loop.startRun(
+      balanceMode: balanceMode && _tilt != null,
+      seed: DateTime.now().millisecondsSinceEpoch,
+    );
     _accum = 0;
     _cameraY = 0;
     _prevLevel = 0;
