@@ -53,7 +53,10 @@ class _GameScreenState extends State<GameScreen> {
     setState(() => _calibrationBusy = false);
     if (ok) {
       setState(() => _calibrating = false);
-      game.startRun(balanceMode: true);
+      game.startRun(
+        balanceMode: true,
+        looseStack: widget.settings.looseStack,
+      );
     } else {
       setState(() => _tiltError =
           'Tilt is unavailable or motion access was denied.\n'

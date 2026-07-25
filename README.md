@@ -4,12 +4,12 @@ A hyper-casual stacking game (V1 / MVP). Tap to drop falling blocks and stack
 them as high as you can before the tower topples. Built to produce short,
 filmable, shareable runs.
 
-> **Status: Increment B2 — collapses, saves & bonuses.** The core loop plus
-> Balance Mode, and now: towers break apart into a Jenga-style jumble that
-> lands and settles on the ground (no rigid spin); in Balance Mode an unstable
-> tower first SHEDS its top blocks and opens a SAVE window — steady it to keep
-> playing from the lower height. Scoring: level bonuses (once per level), save
-> bonuses, and a penalty per fallen block. Record & share is next.
+> **Status: Increment B5 — Loose Stack.** The core loop, Balance Mode, and now
+> an expert layer on top of it: with **Loose Stack** on, placed blocks are no
+> longer welded to the tower — tilting shears the stack like a deck of cards.
+> Blocks that slide off cost points, and the run ends only when the tower is
+> stripped back to the bare base. Record & share is next.
+
 
 ## Run it
 
@@ -56,6 +56,14 @@ SAVE IT! — recover the lean inside the window to continue from the lower
 height (+bonus, minus a point per fallen block). Classic mode has no save:
 crossing the threshold collapses the whole tower. Motion permission is
 requested only at that tap, never at launch.
+
+**Loose Stack** (Settings, requires Balance Mode) replaces the topple-and-save
+failure model with continuous erosion: each interface between two blocks slips
+once the lean beats its grip (grip rises with the load above it, so the stack
+shears from the top down and the base stays planted), a section falls when its
+combined centre of mass leaves the block below, and the tower never topples
+outright. Key dials: `slipAngle`, `gripPerBlockAbove`, `slideAccelGain`,
+`minSupportFraction`, `looseLeanWall`.
 
 Platform notes:
 - **iOS app**: needs `NSMotionUsageDescription` (already in Info.plist).

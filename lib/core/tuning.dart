@@ -238,6 +238,42 @@ class TuningConfig {
   final double depthShade;
 
   // ---------------------------------------------------------------------------
+  // Loose Stack (opt-in, requires Balance Mode)
+  //
+  // Placed blocks stop being welded to the tower: each INTERFACE between two
+  // stacked blocks can slip once the lean exceeds its grip, and the stack
+  // shears like a deck of cards. Grip rises with the load above the interface,
+  // so the tower shears from the TOP down and the base stays planted. (This is
+  // a deliberate game-feel deviation from strict Coulomb friction, which is
+  // load-independent and would slip every interface at once.)
+  // ---------------------------------------------------------------------------
+
+  /// Lean magnitude (radians) at which the TOP-most interface starts to slip.
+  final double slipAngle;
+
+  /// Extra grip (radians) added per block of load resting above an interface.
+  final double gripPerBlockAbove;
+
+  /// Cap on interface grip, so deep interfaces are pinned rather than infinite.
+  final double maxGripAngle;
+
+  /// Lean magnitude (radians) the tower is held at in Loose Stack. Lower than
+  /// [toppleThreshold] because this mode never topples: the player can lean on
+  /// the wall indefinitely, and a tall tower held at a steep angle would swing
+  /// its top clean off the screen.
+  final double looseLeanWall;
+
+  /// Slide acceleration (world units/s^2) per radian of lean beyond grip.
+  final double slideAccelGain;
+
+  /// Per-second damping on relative slide velocity.
+  final double slideDamping;
+
+  /// A block loses support (and falls, taking everything above it) when its
+  /// overlap with the block beneath drops below this fraction of its width.
+  final double minSupportFraction;
+
+  // ---------------------------------------------------------------------------
   // Scoring
   // ---------------------------------------------------------------------------
 
@@ -303,6 +339,13 @@ class TuningConfig {
     this.depthLeanVisualGain = 1.0,
     this.depthForeshorten = 0.055,
     this.depthShade = 0.35,
+    this.slipAngle = 0.14,
+    this.gripPerBlockAbove = 0.012,
+    this.maxGripAngle = 0.45,
+    this.looseLeanWall = 0.22,
+    this.slideAccelGain = 14.0,
+    this.slideDamping = 3.5,
+    this.minSupportFraction = 0.34,
     this.perfectBonus = 2,
     this.levelBonus = 5,
     this.saveBonus = 8,

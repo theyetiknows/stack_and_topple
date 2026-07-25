@@ -52,6 +52,20 @@ class SettingsSheet extends StatelessWidget {
                 onChanged: (v) => settings.balanceMode = v,
               ),
               SwitchListTile(
+                title: const Text('Loose Stack'),
+                subtitle: Text(
+                  settings.balanceMode
+                      ? 'Expert: placed blocks slide when you tilt. Blocks '
+                          'that slide off cost points — the run ends only if '
+                          'the whole tower goes.'
+                      : 'Requires Balance Mode.',
+                ),
+                value: settings.looseStack && settings.balanceMode,
+                onChanged: settings.balanceMode
+                    ? (v) => settings.looseStack = v
+                    : null,
+              ),
+              SwitchListTile(
                 title: const Text('Haptics'),
                 subtitle:
                     const Text('Vibration feedback on drops and topples.'),

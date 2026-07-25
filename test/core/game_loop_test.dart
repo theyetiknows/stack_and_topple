@@ -300,6 +300,208 @@ void main() {
     });
   });
 
+  group('loose stack', () {
+    /// A Loose Stack run with [n] perfectly-aligned blocks placed.
+    GameLoop looseRun([int n = 6]) {
+      final loop = _newRun();
+      loop.startRun(balanceMode: true, looseStack: true);
+      _stack(loop, n);
+      return loop;
+    }
+
+    test('requires Balance Mode: the flag is inert on a classic run', () {
+      final loop = _newRun();
+      loop.startRun(looseStack: true); // no balanceMode
+      expect(loop.state.looseStackActive, isFalse);
+    });
+
+    test('below the slip angle nothing slides', () {
+      final loop = looseRun();
+      final s = loop.state;
+      final before = s.tower.map((b) => b.centerX).toList();
+
+      // Well inside every interface's grip.
+      s.leanLateral = s.tuning.slipAngle * 0.5;
+      for (var i = 0; i < 240; i++) {
+        loop.tick(1 / 120, const []);
+        s.leanLateral = s.tuning.slipAngle * 0.5; // hold it there
+      }
+      for (var i = 0; i < s.tower.length; i++) {
+        expect(s.tower[i].centerX, closeTo(before[i], 1e-9));
+      }
+    });
+
+    test('past the slip angle the stack shears from the top down', () {
+      final loop = looseRun();
+      final s = loop.state;
+      final before = s.tower.map((b) => b.centerX).toList();
+
+      // Lean hard enough to overcome the top interfaces but not the deep ones.
+      for (var i = 0; i < 60; i++) {
+        s.leanLateral = s.tuning.toppleThreshold * 0.9;
+        loop.tick(1 / 120, const []);
+      }
+
+      final n = s.tower.length;
+      final topShift = (s.tower[n - 1].centerX - before[n - 1]).abs();
+      final lowShift = (s.tower[1].centerX - before[1]).abs();
+      expect(topShift, greaterThan(0)); // the top slid
+      expect(topShift, greaterThan(lowShift)); // more than anything beneath
+      expect(s.tower.first.centerX, closeTo(before.first, 1e-9)); // base pinned
+      expect(s.phase, GamePhase.sweeping); // erosion, not a topple
+    });
+
+    test('slides carry: displacement never decreases going up the stack', () {
+      final loop = looseRun();
+      final s = loop.state;
+      final before = s.tower.map((b) => b.centerX).toList();
+
+      for (var i = 0; i < 60; i++) {
+        s.leanLateral = s.tuning.toppleThreshold * 0.95;
+        loop.tick(1 / 120, const []);
+      }
+
+      // Each block is carried by every slide beneath it, so shear accumulates
+      // monotonically upward.
+      var prev = 0.0;
+      for (var i = 0; i < s.tower.length; i++) {
+        final shift = (s.tower[i].centerX - before[i]).abs();
+        expect(shift, greaterThanOrEqualTo(prev - 1e-9));
+        prev = shift;
+      }
+    });
+
+    test('a block that loses its footing falls WITH everything above it', () {
+      final loop = _newRun();
+      loop.startRun(balanceMode: true, looseStack: true);
+      final s = loop.state;
+      _stack(loop, 5);
+      final scoreBefore = s.score;
+
+      // Shove a mid-stack block almost clear of its support; the blocks above
+      // it are still aligned, but they are about to lose their floor.
+      final victim = s.tower[2];
+      final below = s.tower[1];
+      victim.centerX = below.centerX + below.width;
+      final expectedLost = s.tower.length - 2;
+
+      loop.tick(1 / 120, const []);
+
+      expect(s.tower.length, 2); // base + the one block below the failure
+      expect(s.blocksLost, expectedLost);
+      expect(s.debris.length, greaterThanOrEqualTo(expectedLost));
+      expect(
+        s.score,
+        scoreBefore - s.tuning.fallenBlockPenalty * expectedLost,
+      );
+      expect(s.blocksPlaced, s.tower.length - 1);
+    });
+
+    test('shearing down to the bare base ends the run', () {
+      final loop = _newRun();
+      loop.startRun(balanceMode: true, looseStack: true);
+      final s = loop.state;
+      _stack(loop, 3);
+
+      // Knock the first stacked block clear: everything above goes with it.
+      s.tower[1].centerX = s.tower[0].centerX + s.tower[0].width * 2;
+      loop.tick(1 / 120, const []);
+
+      expect(s.tower, hasLength(1)); // stripped to the base
+      expect(s.phase, GamePhase.toppling); // wreckage beat, then game over
+      for (var i = 0; i < 2000 && s.phase == GamePhase.toppling; i++) {
+        loop.tick(1 / 60, const []);
+      }
+      expect(s.phase, GamePhase.gameOver);
+    });
+
+    test('erode-only: a hard sustained lean never opens a SAVE window', () {
+      final loop = looseRun(8);
+      final s = loop.state;
+
+      var sawCritical = false;
+      for (var i = 0; i < 1200; i++) {
+        loop.tick(1 / 120, const [BalanceEvent(BalanceInput(roll: 1.0))]);
+        if (s.phase == GamePhase.critical) sawCritical = true;
+        if (s.phase == GamePhase.gameOver) break;
+      }
+      expect(sawCritical, isFalse); // no binary topple/save in this mode
+      // The lean is walled just inside the threshold the whole time.
+      expect(
+        s.leanMagnitude,
+        lessThanOrEqualTo(s.tuning.toppleThreshold + 1e-9),
+      );
+      expect(s.blocksLost, greaterThan(0)); // damage arrived as erosion
+    });
+
+    test('the sweep follows a sheared tower so the top stays reachable', () {
+      final loop = _newRun();
+      loop.startRun(balanceMode: true, looseStack: true);
+      final s = loop.state;
+      _stack(loop, 5);
+
+      // Shear the stack sideways.
+      for (var i = 0; i < 90; i++) {
+        s.leanLateral = s.tuning.toppleThreshold * 0.9;
+        loop.tick(1 / 120, const []);
+      }
+      final topX = s.top.centerX;
+      expect(topX.abs(), greaterThan(0.3)); // it really did drift
+
+      // The next spawn re-centres the sweep on the drifted top block, so the
+      // piece can still be brought fully over it.
+      s.pieceCenterX = s.top.centerX;
+      loop.tick(1 / 120, const [DropEvent()]);
+
+      // The sweep re-centred on the drifted tower rather than the origin
+      // (blocks keep sliding after the spawn, hence the tolerance).
+      expect(s.sweepCenterX, closeTo(topX, 0.05));
+      expect(s.sweepCenterX.abs(), greaterThan(0.3));
+      // ...and the piece still enters a full sweep-range away from that
+      // centre (minus the one sub-step it already travelled this tick).
+      expect(
+        (s.pieceCenterX - s.sweepCenterX).abs(),
+        closeTo(s.tuning.sweepHalfRange, 0.1),
+      );
+    });
+
+    test('an overhanging section falls once its centre of mass leaves support',
+        () {
+      final loop = _newRun();
+      loop.startRun(balanceMode: true, looseStack: true);
+      final s = loop.state;
+      _stack(loop, 4);
+
+      // Shift the top two blocks far enough that the section above block 2
+      // has its combined centre of mass past the contact patch, even though
+      // each individual block still overlaps its neighbour.
+      final support = s.tower[2];
+      for (var i = 3; i < s.tower.length; i++) {
+        s.tower[i].centerX = support.centerX + support.width * 0.9;
+      }
+      loop.tick(1 / 120, const []);
+
+      expect(s.tower.length, lessThan(5)); // the overhang went
+      expect(s.blocksLost, greaterThan(0));
+    });
+
+    test('sticky mode is unchanged: no sliding, save window still opens', () {
+      final loop = _newRun();
+      loop.startRun(balanceMode: true); // looseStack off
+      final s = loop.state;
+      _stack(loop, 4);
+      final before = s.tower.map((b) => b.centerX).toList();
+
+      s.leanLateral = s.tuning.toppleThreshold + 0.05;
+      loop.tick(1 / 120, const []);
+
+      expect(s.phase, GamePhase.critical); // classic shed + SAVE path
+      for (var i = 0; i < s.tower.length; i++) {
+        expect(s.tower[i].centerX, closeTo(before[i], 1e-9)); // welded
+      }
+    });
+  });
+
   group('seeded spawn sides', () {
     List<int> sidesFor(int seed) {
       final loop = _newRun();
@@ -313,6 +515,12 @@ void main() {
       }
       return out;
     }
+
+    test('classic runs keep the sweep centred on the origin', () {
+      final loop = _newRun();
+      loop.startRun(seed: 7);
+      expect(loop.state.sweepCenterX, 0);
+    });
 
     test('pieces enter from both sides, at the matching edge', () {
       final loop = _newRun();

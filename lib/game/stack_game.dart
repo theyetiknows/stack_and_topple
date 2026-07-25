@@ -55,11 +55,13 @@ class StackGame extends FlameGame {
   final ValueNotifier<int> level = ValueNotifier(0);
   final ValueNotifier<int> perfectDrops = ValueNotifier(0);
   final ValueNotifier<int> saves = ValueNotifier(0);
+  final ValueNotifier<int> blocksLost = ValueNotifier(0);
 
   /// Fixed simulation step — decouples feel from frame rate for determinism.
   static const double _fixedDt = 1 / 120;
   double _accum = 0;
   double _cameraY = 0;
+  double _cameraX = 0;
   double _shakePhase = 0; // presentation-only clock for the shake wiggle
 
   // Sky crossfade between level palettes (presentation-only).
@@ -87,14 +89,16 @@ class StackGame extends FlameGame {
     _tilt = null;
   }
 
-  void startRun({bool balanceMode = false}) {
+  void startRun({bool balanceMode = false, bool looseStack = false}) {
     // Entropy enters the deterministic core only here, as the run seed.
     loop.startRun(
       balanceMode: balanceMode && _tilt != null,
+      looseStack: looseStack,
       seed: DateTime.now().millisecondsSinceEpoch,
     );
     _accum = 0;
     _cameraY = 0;
+    _cameraX = 0;
     _prevLevel = 0;
     _paletteBlend = 1;
     _confetti.clear();
@@ -137,6 +141,21 @@ class StackGame extends FlameGame {
     final targetY = (state.blocksPlaced + 1) * tuning.blockHeight;
     _cameraY += (targetY - _cameraY) * (1 - math.exp(-dt * 6.0));
 
+    // In Loose Stack the tower shears sideways AND the lean swings its top
+    // about a base pivot far below the viewport, so the camera tracks
+    // horizontally too. Target includes the rotation displacement, which is
+    // what actually throws a tall tower off-screen.
+    var targetX = 0.0;
+    if (state.looseStackActive && state.tower.isNotEmpty) {
+      final topH = (state.tower.length - 1) * tuning.blockHeight;
+      // Partial compensation: cancelling the rotation swing outright keeps the
+      // top perfectly centred but throws the tower's lower half out of frame.
+      // Following ~70% frames the whole stack.
+      targetX = 0.7 *
+          (state.tower.last.centerX + math.sin(state.leanLateral) * topH);
+    }
+    _cameraX += (targetX - _cameraX) * (1 - math.exp(-dt * 4.0));
+
     _shakePhase += dt;
     _syncNotifiers();
   }
@@ -161,6 +180,7 @@ class StackGame extends FlameGame {
       state: state,
       tuning: tuning,
       cameraY: _cameraY,
+      cameraX: _cameraX,
       width: size.x,
       height: size.y,
       prevLevel: _prevLevel,
@@ -256,6 +276,9 @@ class StackGame extends FlameGame {
       }
       saves.value = state.saves;
     }
+    if (blocksLost.value != state.blocksLost) {
+      blocksLost.value = state.blocksLost;
+    }
   }
 
   @override
@@ -266,6 +289,7 @@ class StackGame extends FlameGame {
     level.dispose();
     perfectDrops.dispose();
     saves.dispose();
+    blocksLost.dispose();
     super.onRemove();
   }
 }

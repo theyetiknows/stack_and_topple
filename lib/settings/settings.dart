@@ -10,9 +10,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 class Settings extends ChangeNotifier {
   Settings._(this._prefs)
       : _balanceMode = _prefs.getBool(_kBalance) ?? false,
+        _looseStack = _prefs.getBool(_kLooseStack) ?? false,
         _haptics = _prefs.getBool(_kHaptics) ?? true;
 
   static const _kBalance = 'balanceMode';
+  static const _kLooseStack = 'looseStack';
   static const _kHaptics = 'haptics';
 
   final SharedPreferences _prefs;
@@ -27,6 +29,18 @@ class Settings extends ChangeNotifier {
     if (v == _balanceMode) return;
     _balanceMode = v;
     _prefs.setBool(_kBalance, v);
+    notifyListeners();
+  }
+
+  /// Expert layer on top of Balance Mode: placed blocks are no longer welded
+  /// to the tower, so tilting shears the stack. OFF by default; inert unless
+  /// [balanceMode] is also on (the core enforces this too).
+  bool get looseStack => _looseStack;
+  bool _looseStack;
+  set looseStack(bool v) {
+    if (v == _looseStack) return;
+    _looseStack = v;
+    _prefs.setBool(_kLooseStack, v);
     notifyListeners();
   }
 

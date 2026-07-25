@@ -56,6 +56,10 @@ class Hud extends StatelessWidget {
                   bonus: game.tuning.saveBonus,
                 ),
               ),
+              Align(
+                alignment: const Alignment(0, -0.52),
+                child: _ShearFlash(blocksLost: game.blocksLost),
+              ),
               if (phase == GamePhase.critical)
                 const Align(
                   alignment: Alignment(0, -0.35),
@@ -170,6 +174,47 @@ class _SaveFlash extends StatelessWidget {
                     letterSpacing: 2.5,
                     color: Color(0xFF69F0AE),
                     shadows: [Shadow(blurRadius: 14, color: Colors.black87)],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// "-N" flash when Loose Stack shears blocks off the tower.
+class _ShearFlash extends StatelessWidget {
+  const _ShearFlash({required this.blocksLost});
+
+  final ValueNotifier<int> blocksLost;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: blocksLost,
+      builder: (context, lost, _) {
+        if (lost == 0) return const SizedBox.shrink();
+        return TweenAnimationBuilder<double>(
+          key: ValueKey(lost),
+          tween: Tween(begin: 0.0, end: 1.0),
+          duration: const Duration(milliseconds: 800),
+          builder: (context, t, _) {
+            final opacity = t < 0.2 ? t / 0.2 : (1 - t) / 0.8;
+            return Opacity(
+              opacity: opacity.clamp(0, 1),
+              child: Transform.translate(
+                offset: Offset(0, 26 * t),
+                child: const Text(
+                  'BLOCKS LOST',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2.0,
+                    color: Color(0xFFFF5252),
+                    shadows: [Shadow(blurRadius: 12, color: Colors.black87)],
                   ),
                 ),
               ),

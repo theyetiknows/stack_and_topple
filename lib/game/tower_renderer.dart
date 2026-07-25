@@ -44,6 +44,7 @@ class TowerPainter {
     required this.state,
     required this.tuning,
     required this.cameraY,
+    required this.cameraX,
     required this.width,
     required this.height,
     required this.prevLevel,
@@ -55,6 +56,10 @@ class TowerPainter {
 
   /// Smoothed world-Y the camera is centred on (follows the tower up).
   final double cameraY;
+
+  /// Smoothed world-X the camera is centred on. Non-zero only in Loose Stack,
+  /// where a sheared tower would otherwise walk straight off the screen edge.
+  final double cameraX;
   final double width;
   final double height;
 
@@ -71,7 +76,7 @@ class TowerPainter {
   late final double _anchorScreenY = height * 0.62;
   late final double _depthPx = tuning.visualBlockDepth * _scale;
 
-  double _sx(double wx) => width / 2 + wx * _scale;
+  double _sx(double wx) => width / 2 + (wx - cameraX) * _scale;
   // Higher world-Y renders higher on screen (smaller screen-Y).
   double _sy(double wy) => _anchorScreenY + (cameraY - wy) * _scale;
 

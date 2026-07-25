@@ -20,16 +20,24 @@ class GameLoop {
 
   /// (Re)start a run: reset to a single base block and begin sweeping.
   /// [balanceMode] arms the depth axis, the tilt→lean coupling, and saves.
+  /// [looseStack] additionally un-welds the stack so blocks shear under lean
+  /// (requires [balanceMode]; it is the tilt that drives the shear).
   /// [seed] drives the core RNG (spawn-side variety); the adapter passes
   /// wall-clock entropy, tests pass constants — the core itself stays
   /// deterministic w.r.t. (seed, dt, events).
-  void startRun({bool balanceMode = false, int seed = 1}) {
+  void startRun({
+    bool balanceMode = false,
+    bool looseStack = false,
+    int seed = 1,
+  }) {
     final t = state.tuning;
     state.tower
       ..clear()
       ..add(Block(centerX: 0, width: t.initialBlockWidth, index: 0));
     state.debris.clear();
     state.rngState = (seed & 0x7fffffff) | 1; // never zero
+    state.sweepCenterX = 0;
+    state.looseStackActive = looseStack && balanceMode;
     _spawnPiece();
     state.leanLateral = 0;
     state.leanLateralVel = 0;
@@ -49,6 +57,7 @@ class GameLoop {
     state.saveWindowTimer = 0;
     state.saveDwellTimer = 0;
     state.saves = 0;
+    state.blocksLost = 0;
     state.highestLevelAwarded = 0;
     state.endTimer = 0;
     state.phase = GamePhase.sweeping;
@@ -104,7 +113,13 @@ class GameLoop {
           dt,
           BalanceInput(roll: state.currentRoll, pitch: state.currentPitch),
         );
-        if (state.leanMagnitude > state.tuning.toppleThreshold) {
+        if (state.looseStackActive) {
+          // Erode-only failure model: the tower never topples outright. The
+          // lean is held at the wall and the damage arrives as blocks shearing
+          // off the top — the run ends when nothing is left but the base.
+          _softWallLean();
+          _updateSlide(dt);
+        } else if (state.leanMagnitude > state.tuning.toppleThreshold) {
           _onUnstable();
         }
         return;
@@ -133,18 +148,7 @@ class GameLoop {
     );
     state.saveWindowTimer -= dt;
 
-    // Soft wall just inside the threshold: rescale the lean vector back and
-    // bleed velocity, so the tower strains against the edge instead of
-    // tipping over it.
-    final wall = t.toppleThreshold * 0.99;
-    final mag = state.leanMagnitude;
-    if (mag > wall) {
-      final scale = wall / mag;
-      state.leanLateral *= scale;
-      state.leanDepth *= scale;
-      state.leanLateralVel *= 0.5;
-      state.leanDepthVel *= 0.5;
-    }
+    _softWallLean();
 
     // Steady-inside-the-zone wins; merely swinging through centre does not.
     if (state.leanMagnitude < t.toppleThreshold * t.saveRecoveryFactor) {
@@ -159,6 +163,132 @@ class GameLoop {
 
     if (state.saveWindowTimer <= 0) {
       _fullCollapse();
+    }
+  }
+
+  /// Hold the lean just inside the topple threshold: rescale the (Lx, Lz)
+  /// vector back to the wall and bleed velocity, so the tower strains against
+  /// the edge instead of tipping over it. Shared by the SAVE window and Loose
+  /// Stack, which both need a leaning-but-not-toppling tower.
+  void _softWallLean() {
+    final t = state.tuning;
+    // Loose Stack never topples, so its wall is a separate, lower angle: it
+    // bounds how far a tall tower can visually swing off-centre while the
+    // player leans on it indefinitely.
+    final wall = state.looseStackActive
+        ? t.looseLeanWall
+        : t.toppleThreshold * 0.99;
+    final mag = state.leanMagnitude;
+    if (mag <= wall) return;
+    final scale = wall / mag;
+    state.leanLateral *= scale;
+    state.leanDepth *= scale;
+    state.leanLateralVel *= 0.5;
+    state.leanDepthVel *= 0.5;
+  }
+
+  /// Loose Stack: slide each interface that the lean has overcome, then drop
+  /// any block that has lost its footing.
+  ///
+  /// Each block's slide velocity is RELATIVE to the block beneath it, and the
+  /// displacements accumulate up the stack (a block is carried by everything
+  /// sliding below it) — that running sum is what produces the deck-of-cards
+  /// shear instead of blocks drifting independently.
+  void _updateSlide(double dt) {
+    final t = state.tuning;
+    final lean = state.leanLateral;
+    final mag = lean.abs();
+    final dir = lean.sign;
+    final damp = (1 - t.slideDamping * dt).clamp(0.0, 1.0);
+
+    var carried = 0.0; // displacement inherited from every interface below
+    for (var i = 1; i < state.tower.length; i++) {
+      final b = state.tower[i];
+      // Load above this interface pins it: the top of the stack goes first.
+      final above = state.tower.length - 1 - i;
+      final grip =
+          math.min(t.slipAngle + t.gripPerBlockAbove * above, t.maxGripAngle);
+      final excess = mag - grip;
+      if (excess > 0) {
+        b.slideVel += dir * t.slideAccelGain * excess * dt;
+      }
+      b.slideVel *= damp;
+      carried += b.slideVel * dt;
+      b.centerX += carried;
+    }
+
+    _checkSupport();
+  }
+
+  /// Bottom-up scan for the first interface that can no longer hold what is
+  /// stacked on it. Two ways to fail, checked at every interface:
+  ///
+  ///  1. *Footing* — the block barely overlaps its support any more.
+  ///  2. *Balance* — the combined centre of mass of everything ABOVE the
+  ///     interface has passed outside the contact patch it rests on.
+  ///
+  /// The second is the one that matters: shear accumulates up the stack, so
+  /// each individual interface can look perfectly healthy while the upper
+  /// section as a whole has toppled well past its footing. Without this the
+  /// tower slides arbitrarily far sideways and simply leaves the screen.
+  void _checkSupport() {
+    final t = state.tuning;
+    for (var i = 1; i < state.tower.length; i++) {
+      final b = state.tower[i];
+      final below = state.tower[i - 1];
+
+      final contactLeft = math.max(b.left, below.left);
+      final contactRight = math.min(b.right, below.right);
+      if (contactRight - contactLeft < b.width * t.minSupportFraction) {
+        _shearFrom(i);
+        return;
+      }
+
+      // Centre of mass of blocks i..top (equal mass per block).
+      var sum = 0.0;
+      for (var k = i; k < state.tower.length; k++) {
+        sum += state.tower[k].centerX;
+      }
+      final com = sum / (state.tower.length - i);
+      if (com < contactLeft || com > contactRight) {
+        _shearFrom(i);
+        return;
+      }
+    }
+  }
+
+  /// Drop `tower[from..]` as tumbling debris: the Loose Stack damage event.
+  /// Charges the fallen-block penalty per block and ends the run if the tower
+  /// is stripped back to the bare base.
+  void _shearFrom(int from) {
+    final t = state.tuning;
+    final dir = state.leanLateral == 0 ? 1.0 : state.leanLateral.sign;
+    final count = state.tower.length - from;
+    if (count <= 0) return;
+
+    while (state.tower.length > from) {
+      _blockToDebris(state.tower.removeLast(), dir);
+    }
+    state.score = math.max(0, state.score - t.fallenBlockPenalty * count);
+    state.blocksLost += count;
+    state.blocksPlaced = state.tower.length - 1;
+    state.impactShakeTimer = t.impactShakeDuration;
+
+    // Everything the player built is gone: that is "the whole tower fell".
+    if (state.tower.length <= 1) {
+      state.leanLateral = 0;
+      state.leanLateralVel = 0;
+      state.leanDepth = 0;
+      state.leanDepthVel = 0;
+      state.collapseTimer = 0;
+      state.phase = GamePhase.toppling;
+      return;
+    }
+
+    // The new top block keeps whatever shear it already had, but the shock
+    // kills the slide momentum of what survives.
+    for (final b in state.tower) {
+      b.slideVel = 0;
     }
   }
 
@@ -256,12 +386,14 @@ class GameLoop {
 
   void _advanceSweep(double dt) {
     final t = state.tuning;
+    final hi = state.sweepCenterX + t.sweepHalfRange;
+    final lo = state.sweepCenterX - t.sweepHalfRange;
     state.pieceCenterX += state.sweepDir * state.currentSweepSpeed * dt;
-    if (state.pieceCenterX > t.sweepHalfRange) {
-      state.pieceCenterX = t.sweepHalfRange;
+    if (state.pieceCenterX > hi) {
+      state.pieceCenterX = hi;
       state.sweepDir = -1;
-    } else if (state.pieceCenterX < -t.sweepHalfRange) {
-      state.pieceCenterX = -t.sweepHalfRange;
+    } else if (state.pieceCenterX < lo) {
+      state.pieceCenterX = lo;
       state.sweepDir = 1;
     }
   }
@@ -366,8 +498,14 @@ class GameLoop {
   /// Spawn the next sweeping piece from a random side (seeded RNG), entering
   /// at the chosen edge and sweeping inward.
   void _spawnPiece() {
+    // Loose Stack lets the tower shear sideways, so the sweep has to travel
+    // with it — a fixed range centred on the origin would leave a drifted top
+    // block barely reachable at the very end of the sweep, or not at all.
+    state.sweepCenterX =
+        state.looseStackActive && state.tower.isNotEmpty ? state.top.centerX : 0;
     state.sweepDir = _nextRand() < 0.5 ? 1 : -1;
-    state.pieceCenterX = -state.sweepDir * state.tuning.sweepHalfRange;
+    state.pieceCenterX =
+        state.sweepCenterX - state.sweepDir * state.tuning.sweepHalfRange;
   }
 
   /// Core-side LCG in [0, 1); advances [GameState.rngState]. High bits only

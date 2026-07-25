@@ -50,6 +50,11 @@ class GameState {
   /// +1 sweeping right, -1 sweeping left.
   int sweepDir = 1;
 
+  /// World X the sweep range is centred on. Fixed at 0 normally; in Loose
+  /// Stack it tracks the top block, so a sheared tower stays reachable
+  /// (otherwise the sweep runs out before it gets to where the tower drifted).
+  double sweepCenterX = 0;
+
   // --- Lean physics (radians) --------------------------------------------------
   double leanLateral = 0; // Lx
   double leanLateralVel = 0;
@@ -59,6 +64,10 @@ class GameState {
   // --- Balance Mode ------------------------------------------------------------
   /// Whether this run was started with Balance Mode (tilt) engaged.
   bool balanceModeActive = false;
+
+  /// Whether this run was started with Loose Stack engaged (placed blocks
+  /// slide against each other under lean). Requires Balance Mode.
+  bool looseStackActive = false;
 
   /// Latest processed tilt input, HELD between sensor events (sensors emit at
   /// ~50 Hz while the sim ticks at 120 Hz — snapping to zero between events
@@ -100,6 +109,9 @@ class GameState {
 
   /// Successful Balance-Mode saves this run (drives the SAVED! flash).
   int saves = 0;
+
+  /// Cumulative blocks lost to Loose Stack shearing (drives the "-N" flash).
+  int blocksLost = 0;
 
   /// Highest level already granted its one-time bonus this run.
   int highestLevelAwarded = 0;
