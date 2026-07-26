@@ -189,7 +189,8 @@ class TuningConfig {
   /// Ignore normalised tilt inputs smaller than this (dead-zone) to kill jitter.
   final double tiltDeadZone;
 
-  /// Deviation angle (radians) that maps to full input. ~0.35 rad ≈ 20°.
+  /// Deviation angle (radians) that maps to full input. 0.785 rad = 45°,
+  /// giving a roughly 1:1 feel — tilt the phone 45° and the tower follows.
   final double tiltMaxAngle;
 
   /// Low-pass smoothing factor per sensor sample (0..1; higher = snappier).
@@ -249,18 +250,24 @@ class TuningConfig {
   // ---------------------------------------------------------------------------
 
   /// Lean magnitude (radians) at which the TOP-most interface starts to slip.
+  /// ~4°: shear should begin early and build, not switch on late.
   final double slipAngle;
 
   /// Extra grip (radians) added per block of load resting above an interface.
+  /// Sized so grip PROGRESSES across the 4°–45° band (roughly: the top two
+  /// interfaces slip at 10°, the top five by 25°, most of the tower at 45°).
+  /// Too small and the whole stack liquefies at once, losing the top-down
+  /// shear that makes the mode readable.
   final double gripPerBlockAbove;
 
   /// Cap on interface grip, so deep interfaces are pinned rather than infinite.
   final double maxGripAngle;
 
-  /// Lean magnitude (radians) the tower is held at in Loose Stack. Lower than
-  /// [toppleThreshold] because this mode never topples: the player can lean on
-  /// the wall indefinitely, and a tall tower held at a steep angle would swing
-  /// its top clean off the screen.
+  /// Lean magnitude (radians) the tower is held at in Loose Stack — 0.785 rad
+  /// = 45°, matching [tiltMaxAngle] so phone and tower move together. This
+  /// mode never topples, so the player can sit on the wall indefinitely; the
+  /// resulting sideways swing of a tall tower is what the dynamic fit camera
+  /// in StackGame exists to keep framed.
   final double looseLeanWall;
 
   /// Slide acceleration (world units/s^2) per radian of lean beyond grip.
@@ -325,10 +332,10 @@ class TuningConfig {
     this.perfectFlashDuration = 0.55,
     this.dropBounceDuration = 0.16,
     this.impactShakeDuration = 0.28,
-    this.tiltLeanTarget = 0.55,
-    this.tiltLeanTargetPitch = 0.46,
+    this.tiltLeanTarget = 0.85,
+    this.tiltLeanTargetPitch = 0.70,
     this.tiltDeadZone = 0.06,
-    this.tiltMaxAngle = 0.22,
+    this.tiltMaxAngle = 0.785,
     this.tiltSmoothing = 0.30,
     this.calibrationSamples = 15,
     this.rollSign = 1.0,
@@ -339,13 +346,13 @@ class TuningConfig {
     this.depthLeanVisualGain = 1.0,
     this.depthForeshorten = 0.055,
     this.depthShade = 0.35,
-    this.slipAngle = 0.14,
-    this.gripPerBlockAbove = 0.012,
-    this.maxGripAngle = 0.45,
-    this.looseLeanWall = 0.22,
-    this.slideAccelGain = 14.0,
-    this.slideDamping = 3.5,
-    this.minSupportFraction = 0.34,
+    this.slipAngle = 0.07,
+    this.gripPerBlockAbove = 0.05,
+    this.maxGripAngle = 0.80,
+    this.looseLeanWall = 0.785,
+    this.slideAccelGain = 22.0,
+    this.slideDamping = 2.8,
+    this.minSupportFraction = 0.28,
     this.perfectBonus = 2,
     this.levelBonus = 5,
     this.saveBonus = 8,

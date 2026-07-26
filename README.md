@@ -65,6 +65,13 @@ combined centre of mass leaves the block below, and the tower never topples
 outright. Key dials: `slipAngle`, `gripPerBlockAbove`, `slideAccelGain`,
 `minSupportFraction`, `looseLeanWall`.
 
+Tilt is mapped roughly **1:1**: `tiltMaxAngle` = 45°, so tilting the phone 45°
+leans the tower ~45°. Because a tall tower at a steep lean is wider than the
+viewport, `StackGame` runs a **dynamic fit camera** in Loose Stack that pans and
+zooms to contain the tower (lateral shear + lean rotation + depth projection).
+Roughly how fast a 13-block tower erodes at a held lean: 5° ≈ never, 10° ≈ first
+loss at 2.4s (stabilises), 15° ≈ stripped in 4.8s, 25° ≈ 1.8s, 45° ≈ instant.
+
 Platform notes:
 - **iOS app**: needs `NSMotionUsageDescription` (already in Info.plist).
 - **Web on iPhone (Safari)**: works via DeviceMotion — Safari shows its motion

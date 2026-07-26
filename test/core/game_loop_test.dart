@@ -336,9 +336,13 @@ void main() {
       final s = loop.state;
       final before = s.tower.map((b) => b.centerX).toList();
 
-      // Lean hard enough to overcome the top interfaces but not the deep ones.
+      // Enough to overcome the top interfaces but not the deep ones: grip
+      // grows by gripPerBlockAbove per block of load, so target a lean that
+      // only the upper few interfaces can lose.
+      final partial =
+          s.tuning.slipAngle + s.tuning.gripPerBlockAbove * 2.5;
       for (var i = 0; i < 60; i++) {
-        s.leanLateral = s.tuning.toppleThreshold * 0.9;
+        s.leanLateral = partial;
         loop.tick(1 / 120, const []);
       }
 
@@ -357,7 +361,7 @@ void main() {
       final before = s.tower.map((b) => b.centerX).toList();
 
       for (var i = 0; i < 60; i++) {
-        s.leanLateral = s.tuning.toppleThreshold * 0.95;
+        s.leanLateral = s.tuning.slipAngle + s.tuning.gripPerBlockAbove * 3;
         loop.tick(1 / 120, const []);
       }
 
@@ -426,10 +430,11 @@ void main() {
         if (s.phase == GamePhase.gameOver) break;
       }
       expect(sawCritical, isFalse); // no binary topple/save in this mode
-      // The lean is walled just inside the threshold the whole time.
+      // Loose Stack is walled at its OWN (much wider) angle, not the topple
+      // threshold — the tower leans hard and sheds instead of tipping.
       expect(
         s.leanMagnitude,
-        lessThanOrEqualTo(s.tuning.toppleThreshold + 1e-9),
+        lessThanOrEqualTo(s.tuning.looseLeanWall + 1e-9),
       );
       expect(s.blocksLost, greaterThan(0)); // damage arrived as erosion
     });
@@ -440,11 +445,16 @@ void main() {
       final s = loop.state;
       _stack(loop, 5);
 
-      // Shear the stack sideways.
-      for (var i = 0; i < 90; i++) {
-        s.leanLateral = s.tuning.toppleThreshold * 0.9;
+      // Shear the stack sideways: hold a moderate lean only until the tower
+      // has visibly drifted, so the test states its intent ("drifted, still
+      // standing") rather than encoding a tick count that every friction
+      // retune invalidates.
+      final lean = s.tuning.slipAngle + s.tuning.gripPerBlockAbove * 2;
+      for (var i = 0; i < 1200 && s.top.centerX.abs() < 0.5; i++) {
+        s.leanLateral = lean;
         loop.tick(1 / 120, const []);
       }
+      expect(s.tower.length, greaterThan(2)); // survived to be stacked on
       final topX = s.top.centerX;
       expect(topX.abs(), greaterThan(0.3)); // it really did drift
 
@@ -483,6 +493,29 @@ void main() {
 
       expect(s.tower.length, lessThan(5)); // the overhang went
       expect(s.blocksLost, greaterThan(0));
+    });
+
+    test('at the full 45° wall every interface slips but the base never moves',
+        () {
+      final loop = _newRun();
+      loop.startRun(balanceMode: true, looseStack: true);
+      final s = loop.state;
+      _stack(loop, 6);
+      final before = s.tower.map((b) => b.centerX).toList();
+      final baseX = s.tower.first.centerX;
+
+      // One tick at the wall, before anything has had time to shear off.
+      s.leanLateral = s.tuning.looseLeanWall;
+      loop.tick(1 / 120, const []);
+
+      for (var i = 1; i < s.tower.length; i++) {
+        expect(
+          s.tower[i].centerX,
+          isNot(closeTo(before[i], 1e-9)),
+          reason: 'interface $i should slip at the 45° wall',
+        );
+      }
+      expect(s.tower.first.centerX, closeTo(baseX, 1e-9)); // base is planted
     });
 
     test('sticky mode is unchanged: no sliding, save window still opens', () {

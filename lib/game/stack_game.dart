@@ -62,6 +62,7 @@ class StackGame extends FlameGame {
   double _accum = 0;
   double _cameraY = 0;
   double _cameraX = 0;
+  late double _viewHalfWidth = TowerPainter.defaultViewHalfWidth(tuning);
   double _shakePhase = 0; // presentation-only clock for the shake wiggle
 
   // Sky crossfade between level palettes (presentation-only).
@@ -99,6 +100,7 @@ class StackGame extends FlameGame {
     _accum = 0;
     _cameraY = 0;
     _cameraX = 0;
+    _viewHalfWidth = TowerPainter.defaultViewHalfWidth(tuning);
     _prevLevel = 0;
     _paletteBlend = 1;
     _confetti.clear();
@@ -145,16 +147,15 @@ class StackGame extends FlameGame {
     // about a base pivot far below the viewport, so the camera tracks
     // horizontally too. Target includes the rotation displacement, which is
     // what actually throws a tall tower off-screen.
-    var targetX = 0.0;
-    if (state.looseStackActive && state.tower.isNotEmpty) {
-      final topH = (state.tower.length - 1) * tuning.blockHeight;
-      // Partial compensation: cancelling the rotation swing outright keeps the
-      // top perfectly centred but throws the tower's lower half out of frame.
-      // Following ~70% frames the whole stack.
-      targetX = 0.7 *
-          (state.tower.last.centerX + math.sin(state.leanLateral) * topH);
-    }
-    _cameraX += (targetX - _cameraX) * (1 - math.exp(-dt * 4.0));
+    // Loose Stack lets the tower lean to 45deg, which swings a tall tower's top
+    // far wider than a fixed viewport shows. Fit the view to the tower instead:
+    // measure where every block will actually be drawn and both centre and zoom
+    // to contain it. Panning alone cannot solve this — at 45deg the stack is
+    // simply wider than the screen.
+    final fit = _fitBounds();
+    _cameraX += (fit.center - _cameraX) * (1 - math.exp(-dt * 4.0));
+    _viewHalfWidth +=
+        (fit.halfWidth - _viewHalfWidth) * (1 - math.exp(-dt * 3.0));
 
     _shakePhase += dt;
     _syncNotifiers();
@@ -181,6 +182,7 @@ class StackGame extends FlameGame {
       tuning: tuning,
       cameraY: _cameraY,
       cameraX: _cameraX,
+      viewHalfWidth: _viewHalfWidth,
       width: size.x,
       height: size.y,
       prevLevel: _prevLevel,
@@ -188,6 +190,50 @@ class StackGame extends FlameGame {
     ).paint(canvas);
     _renderConfetti(canvas);
     canvas.restore();
+  }
+
+  /// Horizontal extent the camera must cover, in world units.
+  ///
+  /// Accounts for all three things that displace a block sideways on screen:
+  /// its own lateral shear, the lean rotation about the base pivot (which
+  /// grows with height, and is what actually throws a tall tower off-screen),
+  /// and the pseudo-3D depth projection. Outside Loose Stack this collapses to
+  /// the default framing, so classic and sticky runs are untouched.
+  ({double center, double halfWidth}) _fitBounds() {
+    final fallback = TowerPainter.defaultViewHalfWidth(tuning);
+    if (!state.looseStackActive || state.tower.isEmpty) {
+      return (center: 0, halfWidth: fallback);
+    }
+
+    final sinLean = math.sin(state.leanLateral);
+    var minX = double.infinity;
+    var maxX = double.negativeInfinity;
+
+    void include(double centerX, double width, double height) {
+      final dz = TowerPainter.depthShiftWorld(height, state.leanDepth, tuning);
+      final x = centerX + sinLean * height + dz * TowerPainter.depthDirX;
+      minX = math.min(minX, x - width / 2);
+      maxX = math.max(maxX, x + width / 2);
+    }
+
+    for (final b in state.tower) {
+      include(b.centerX, b.width, b.index * tuning.blockHeight);
+    }
+    if (state.phase == GamePhase.sweeping) {
+      include(
+        state.pieceCenterX,
+        state.pieceWidth,
+        (state.blocksPlaced + 1) * tuning.blockHeight,
+      );
+    }
+
+    const margin = 1.0;
+    return (
+      center: (minX + maxX) / 2,
+      halfWidth: ((maxX - minX) / 2 + margin)
+          .clamp(fallback, fallback * 2.5)
+          .toDouble(),
+    );
   }
 
   // --- Milestone confetti -------------------------------------------------------

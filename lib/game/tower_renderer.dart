@@ -45,6 +45,7 @@ class TowerPainter {
     required this.tuning,
     required this.cameraY,
     required this.cameraX,
+    required this.viewHalfWidth,
     required this.width,
     required this.height,
     required this.prevLevel,
@@ -60,6 +61,11 @@ class TowerPainter {
   /// Smoothed world-X the camera is centred on. Non-zero only in Loose Stack,
   /// where a sheared tower would otherwise walk straight off the screen edge.
   final double cameraX;
+
+  /// World units visible either side of [cameraX]. [kDefaultViewHalfWidth]
+  /// normally; the fit camera widens it so a tower leaning up to 45° still
+  /// fits on screen.
+  final double viewHalfWidth;
   final double width;
   final double height;
 
@@ -69,10 +75,15 @@ class TowerPainter {
   final double paletteBlend;
 
   // Screen direction (unit-ish) in which the pseudo-3D depth recedes.
-  static const double _depthDirX = 0.78;
+  static const double depthDirX = 0.78;
   static const double _depthDirY = -0.52;
 
-  late final double _scale = width / (2 * tuning.sweepHalfRange + 2.0);
+  /// The framing used whenever the tower is upright: the full sweep range
+  /// plus a block's worth of margin.
+  static double defaultViewHalfWidth(TuningConfig t) =>
+      t.sweepHalfRange + 1.0;
+
+  late final double _scale = width / (2 * viewHalfWidth);
   late final double _anchorScreenY = height * 0.62;
   late final double _depthPx = tuning.visualBlockDepth * _scale;
 
@@ -81,9 +92,17 @@ class TowerPainter {
   double _sy(double wy) => _anchorScreenY + (cameraY - wy) * _scale;
 
   /// World-space displacement along the depth diagonal for a point at world
-  /// height [hWorld], given the current depth lean.
+  /// height [hWorld], given the current depth lean. Static so the fit camera
+  /// can budget for the same displacement it is about to draw.
+  static double depthShiftWorld(
+    double hWorld,
+    double leanDepth,
+    TuningConfig t,
+  ) =>
+      math.sin(leanDepth) * hWorld * t.depthLeanVisualGain;
+
   double _depthShiftWorld(double hWorld) =>
-      math.sin(state.leanDepth) * hWorld * tuning.depthLeanVisualGain;
+      depthShiftWorld(hWorld, state.leanDepth, tuning);
 
   void paint(Canvas canvas) {
     if (width <= 0 || height <= 0) return;
@@ -215,7 +234,7 @@ class TowerPainter {
     required bool active,
   }) {
     final dz = _depthShiftWorld(bottomY + blockH / 2);
-    final dxPx = dz * _scale * _depthDirX;
+    final dxPx = dz * _scale * depthDirX;
     final dyPx = dz * _scale * _depthDirY;
     // Foreshorten: receding blocks narrow slightly, approaching ones widen.
     final ws = (1 - dz * tuning.depthForeshorten).clamp(0.55, 1.45).toDouble();
@@ -323,7 +342,7 @@ class TowerPainter {
         Color.lerp(base, Colors.white, 0.32)!.withValues(alpha: opacity);
     final sideFace =
         Color.lerp(base, Colors.black, 0.34)!.withValues(alpha: opacity);
-    final dx = _depthPx * _depthDirX;
+    final dx = _depthPx * depthDirX;
     final dy = _depthPx * _depthDirY;
 
     // Top face.
